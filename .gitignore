@@ -1,11 +1,12 @@
-# 运行时/环境
+# 平台运行时（不入库）
+.dsh-home/sessions/
+.dsh-home/storages/
+.dsh-home/m0-test.yml
+.dsh-home/pg-persist-test.yml
+.dsh-home/*.log
 node_modules/
-dist/
-data/
-*.log
-.env
+*.tsbuildinfo
 .DS_Store
-# 本机沙箱缓存与运行时数据（不入库）
-.npm-cache/
-.podman/
-.dsh-home/
+
+# 构建产物
+**/dist/

@@ -1,0 +1,42 @@
+{
+  "name": "@company/platform-task-worker",
+  "description": "平台任务 Worker（19 工单）：TS SDK 驱动 DSH 运行时执行自动化任务",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "tsx src/smoke.ts",
+    "worker": "tsx src/worker.ts"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-sdk-client": "workspace:^",
+    "@deepseek-ai/dsh-sdk-jsonrpc-server": "workspace:^",
+    "@deepseek-ai/dsh-llm-deepseek": "workspace:^",
+    "@deepseek-ai/dsh-sandbox-local": "workspace:^",
+    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:^",
+    "@deepseek-ai/dsh-fs-local": "workspace:^",
+    "@deepseek-ai/dsh-agent-spine-demo": "workspace:^",
+    "@deepseek-ai/dsh-mcp-client": "workspace:^",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
+    "bullmq": "^5.0.0",
+    "pg": "^8.13.0",
+    "@deepseek-ai/dsh-workflow": "workspace:^",
+    "@deepseek-ai/dsh-workflow-worker-thread": "workspace:^",
+    "@deepseek-ai/dsh-tool-workflow": "workspace:^",
+    "@deepseek-ai/dsh-subagent": "workspace:^",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:^",
+    "@deepseek-ai/dsh-subagent-fork-in-process": "workspace:^",
+    "@deepseek-ai/dsh-tool-subagent": "workspace:^",
+    "@deepseek-ai/dsh-tool-subagent-control": "workspace:^",
+    "@deepseek-ai/dsh-tool-subagent-report": "workspace:^",
+    "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:^"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/pg": "^8.11.0",
+    "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "@deepseek-ai/cordis-plugin-loader": "workspace:^",
+    "@deepseek-ai/cordis-plugin-include": "workspace:^"
+  }
+}

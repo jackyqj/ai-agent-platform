@@ -1,0 +1,9 @@
+{"type":"session","version":0,"id":"task-e14fa24c-6b94-4667-9691-8230ced63df8-a1","createdAt":1787129818235,"cwd":"/Users/jac/sw_dir/dsh/dsh-source/packages/platform/task-worker","delegationDepth":0}
+{"type":"agent/inbox/spliced","seq":0,"time":1787129818237,"data":{"target":"next-turn","start":0,"inserted":[{"content":[{"type":"text","text":"详细介绍一下公司报销制度的所有条款，尽可能长"}],"source":{"kind":"user"},"role":"user","id":"0b8972a0-32c8-4db5-8236-9fdbc34b61c0"}]}}
+{"type":"turn/start","seq":1,"time":1787129818237,"data":{"turn":1}}
+{"type":"agent/inbox/spliced","seq":2,"time":1787129818237,"data":{"target":"next-turn","start":0,"removedCount":1,"inserted":[]}}
+{"type":"step/start","seq":3,"time":1787129818238,"data":{"turn":1,"step":1}}
+{"type":"user/message","seq":4,"time":1787129818238,"data":{"content":[{"type":"text","text":"详细介绍一下公司报销制度的所有条款，尽可能长"}],"source":{"kind":"user"},"role":"user","id":"0b8972a0-32c8-4db5-8236-9fdbc34b61c0"},"surfaceOp":"append"}
+{"type":"session/title","seq":5,"time":1787129818239,"data":{"title":"详细介绍一下公司报销制度的","messageSeqs":[4],"source":{"kind":"fallback"}}}
+{"type":"request/header","seq":6,"time":1787129818239,"data":{"header":{"config":{"provider":"deepseek-official","model":"deepseek-ai/deepseek-v4-flash-0731","maxTokens":8192,"reasoningEffort":"high"},"adapterDefaults":{"reasoningEffort":true},"system":"你是「公司 AI 助手」：用工具查知识库、算数据、生成文档，做完汇报结果。"},"reason":"initial"}}
+{"type":"request/context","seq":7,"time":1787129818239,"data":{"provider":"deepseek-official","model":"deepseek-ai/deepseek-v4-flash-0731","contextWindow":1000000}}

@@ -69,7 +69,8 @@ curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application
 ## 3. 启动任务 Worker（真实执行 Agent 任务）
 
 ```sh
-cd dsh-source/packages/platform/task-worker
+cd dsh-source/packages/platform/task-worker   # dsh-source 为仓库内 vendor 源码
+export DSH_HOME="$REPO_ROOT/.dsh-home"        # 仓库内运行时目录（presets/profiles/sessions）
 export DATABASE_URL="$PG_DSN" DEEPSEEK_API_KEY="$NVIDIA_KEY"
 export DEEPSEEK_BASE_URL="https://integrate.api.nvidia.com/v1"
 ./node_modules/.bin/tsx src/worker.ts

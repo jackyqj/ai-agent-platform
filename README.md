@@ -25,7 +25,7 @@
 - **DSH 耦合组件**（见 `deps/README.md`，物理位于 DSH 工作区）：任务 Worker、PG 会话持久化 Provider——
   它们依赖 DSH workspace 的 `@deepseek-ai/*` 包与共享测试契约，必须随 DSH 源码工作区构建运行
 
-DSH 工作区位于 `/Users/jac/sw_dir/dsh/dsh-source/`；`dsh-source/packages/platform/` 与
+DSH 工作区位于 `/Users/jac/sw_dir/ai-agent-platform/dsh-source/`；`dsh-source/packages/platform/` 与
 `dsh-source/packages/session/session-persistence-pg/` 为平台自有（工作区托管），详见 deps 说明。
 
 ## 快速开始

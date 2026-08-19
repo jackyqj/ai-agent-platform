@@ -103,7 +103,7 @@ export class AgentsService implements OnModuleInit {
   // ── 员工自建提审（12 工单：复制即作者写入口，与 DSH agentPresets.copy 语义一致）──
 
   private presetRoot(): string {
-    return process.env.CP_PRESET_ROOT ?? '/Users/jac/sw_dir/dsh/.dsh-home/presets-company'
+    return process.env.CP_PRESET_ROOT ?? '/Users/jac/sw_dir/ai-agent-platform/.dsh-home/presets-company'
   }
 
   /** 提审：创建 draft 行（id 校验 + 不冲突 + 基于模板），内容文件待 admin 批准后生成 */

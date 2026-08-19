@@ -7,12 +7,12 @@
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 仓库 | `/Users/jac/sw_dir/dsh/dsh-source/` | 105MB，depth 50，HEAD = 0.1.0-rc.5 |
+| 仓库 | `/Users/jac/sw_dir/ai-agent-platform/dsh-source/` | 105MB，depth 50，HEAD = 0.1.0-rc.5 |
 | Node | v26.5.0 | 满足 `^22.19 \|\| >=24` |
 | pnpm | 11.21（仓库 pin 11.7） | 工作区解析正常 |
 | 构建 | `pnpm install` 41.5s + `pnpm run build` 成功 | 219 包 + Web 前端 dist |
 | 启动 | `pnpm dsh --profile <name> <args>` | TypeScript 源码入口（tsx） |
-| DSH_HOME | `/Users/jac/sw_dir/dsh/.dsh-home/` | **沙箱要求：DSH_HOME 必须指到工作区内**（`~/.dsh` 会被文件沙箱拦截） |
+| DSH_HOME | `/Users/jac/sw_dir/ai-agent-platform/.dsh-home/` | **沙箱要求：DSH_HOME 必须指到工作区内**（`~/.dsh` 会被文件沙箱拦截） |
 
 ## 沙箱注意事项（重要）
 

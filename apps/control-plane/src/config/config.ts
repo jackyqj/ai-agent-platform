@@ -4,9 +4,8 @@ export interface AppConfig {
   jwtSecret: string
   jwtTtl: string
   authMode: 'dev' | 'oidc'
-  /** OIDC（钉钉）配置——AUTH_MODE=oidc 时必填 */
+  /** OIDC（钉钉）配置——AUTH_MODE=oidc 时必填。钉钉为自定义 OAuth（无 discovery），端点硬编码在 auth.service */
   oidc: {
-    issuer: string
     clientId: string
     clientSecret: string
     redirectUri: string
@@ -44,7 +43,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtTtl: env.CP_JWT_TTL ?? '2h',
     authMode: (env.CP_AUTH_MODE ?? 'dev') as AppConfig['authMode'],
     oidc: {
-      issuer: env.CP_OIDC_ISSUER ?? '',
       clientId: env.CP_OIDC_CLIENT_ID ?? '',
       clientSecret: env.CP_OIDC_CLIENT_SECRET ?? '',
       redirectUri: env.CP_OIDC_REDIRECT_URI ?? 'http://127.0.0.1:4000/api/auth/sso/callback',

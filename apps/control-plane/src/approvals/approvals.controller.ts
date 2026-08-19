@@ -1,0 +1,43 @@
+// 审批 API（14 工单）：待审批列表/决定/我的审批
+import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
+import { AuthGuard } from '../common/auth.guard.js'
+import { Roles } from '../common/roles.decorator.js'
+import { ApprovalService } from './approval.service.js'
+import { TasksService } from '../tasks/tasks.service.js'
+
+@Controller()
+export class ApprovalsController {
+  constructor(
+    private readonly approvals: ApprovalService,
+    private readonly tasks: TasksService,
+  ) {}
+
+  /** 我的审批记录 */
+  @Get('approvals/mine')
+  @UseGuards(AuthGuard)
+  async mine(@Req() req: { user: { sub: string } }) {
+    return { approvals: await this.approvals.listMine(req.user.sub) }
+  }
+
+  /** 待审批列表（admin/manager） */
+  @Get('admin/approvals/pending')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  async pending() {
+    return { approvals: await this.approvals.listPending() }
+  }
+
+  /** 决定：approve | reject（通过后任务入队） */
+  @Post('admin/approvals/:id/decide')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  async decide(@Req() req: { user: { sub: string } }, @Param('id') id: string, @Body() body: { approve: boolean }) {
+    try {
+      const a = await this.approvals.decide(id, body.approve === true, req.user.sub, (taskId) => this.tasks.enqueue(taskId))
+      if (!a) throw new HttpException('approval not found', HttpStatus.NOT_FOUND)
+      return { approval: a, notice: body.approve ? '已批准，关联任务将入队执行' : '已拒绝' }
+    } catch (e) {
+      throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
+    }
+  }
+}

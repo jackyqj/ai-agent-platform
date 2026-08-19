@@ -1,0 +1,101 @@
+import { Injectable } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
+import { AuditStore } from '../common/audit.store.js'
+import { PgStore } from '../store/pg.store.js'
+import { InstancesService } from '../instances/instances.service.js'
+
+export interface Session {
+  id: string
+  userId: string
+  agentPresetId: string
+  type: 'web' | 'rpc'
+  instanceId?: string
+  routingSecret: string
+  status: 'active' | 'idle' | 'closed'
+  createdAt: string
+  lastActiveAt: string
+}
+
+/**
+ * 会话路由（enterprise-shell §3.3）：用户 ↔ 会话 ↔ 实例映射 + routing_secret
+ * 持久化（08）：PG sessions 表为主存储（跨实例/重启可恢复）；PG 不可用时回退内存。
+ */
+@Injectable()
+export class SessionsService {
+  private memory = new Map<string, Session>()
+
+  constructor(
+    private readonly instances: InstancesService,
+    private readonly audit: AuditStore,
+    private readonly pg: PgStore,
+  ) {}
+
+  private async persist(): Promise<boolean> {
+    return this.pg.pool !== null
+  }
+
+  async create(userId: string, agentPresetId = 'assistant'): Promise<Session> {
+    // 懒启动实例（02 profile 镜像的注入参数；生产 env 来自密钥服务/配置中心）
+    const instance = await this.instances.getOrCreateWebInstance({
+      userId,
+      env: {
+        DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL ?? '',
+        CP_TRUSTED_HOST: '127.0.0.1',
+        DSH_HOME: '/dsh-home', // 容器内 DSH_HOME（08 工单后为共享卷）
+      },
+    })
+    const session: Session = {
+      id: randomUUID(),
+      userId,
+      agentPresetId,
+      type: 'web',
+      instanceId: instance.id,
+      routingSecret: randomUUID(),
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+    }
+    if (await this.persist()) {
+      await this.pg.insertSession(session)
+    } else {
+      this.memory.set(session.id, session)
+    }
+    await this.audit.append({ userId, sessionId: session.id, eventType: 'session.create', payload: { agentPresetId } })
+    return session
+  }
+
+  async listForUser(userId: string): Promise<Session[]> {
+    if (await this.persist()) {
+      try {
+        return await this.pg.listSessions(userId)
+      } catch (e) {
+        console.error('[sessions] PG list failed, falling back:', (e as Error).message)
+      }
+    }
+    return [...this.memory.values()].filter((s) => s.userId === userId && s.status !== 'closed')
+  }
+
+  async get(id: string): Promise<Session | undefined> {
+    if (await this.persist()) {
+      try {
+        const row = await this.pg.getSession(id)
+        if (row) return row
+      } catch (e) {
+        console.error('[sessions] PG get failed, falling back:', (e as Error).message)
+      }
+    }
+    return this.memory.get(id)
+  }
+
+  async close(id: string, userId: string): Promise<void> {
+    const s = (await this.get(id)) ?? this.memory.get(id)
+    if (!s || s.userId !== userId) return
+    if (await this.persist()) {
+      await this.pg.updateSessionStatus(id, 'closed')
+    } else {
+      this.memory.delete(id)
+    }
+    if (s.instanceId) await this.instances.stop(s.instanceId)
+    await this.audit.append({ userId, sessionId: id, eventType: 'session.close', payload: {} })
+  }
+}

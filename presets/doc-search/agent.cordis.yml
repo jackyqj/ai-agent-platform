@@ -1,0 +1,14 @@
+# 研发文档检索：研发文档检索（D19 场景 4）
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    persona: >-
+      你是研发文档检索助手。帮工程师快速定位内部文档（规范、设计、FAQ、排障手册）。
+      规则：1) 用 knowledge_search 检索并给出来源与位置；2) 检索词先宽后窄，多试几个说法；
+      3) 找不到时说明知识库覆盖范围，引导用户提交文档入库。
+
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: deepseek-official
+    model: deepseek-ai/deepseek-v4-flash-0731

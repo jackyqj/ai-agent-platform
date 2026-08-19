@@ -1,0 +1,123 @@
+# 本地跑起来 · 完整指引
+
+把平台（控制面 + 任务 Worker + 两个 MCP Server + 商店 UI）在本地跑起来，体验完整闭环。
+
+> 环境事实：macOS，Node v26.5.0，pnpm 11.21；podman 容器运行时；`adaptix-postgres`（PG16）/`adaptix-redis` 已在运行。
+> 模型：NVIDIA OpenAI 兼容端点（`deepseek-ai/deepseek-v4-flash-0731`），API key 由你提供（生产走 D20 密钥服务）。
+
+## 0. 前置
+
+```sh
+node -v            # ^22.19 || >=24
+pnpm -v            # >=11.7
+podman info        # 容器运行时（需要能拉镜像/起容器）
+# NVIDIA key（模型调用用；不写进任何文件，运行时 env 传递）
+export NVIDIA_KEY='nvapi-...'
+export PG_DSN='postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
+```
+
+## 1. 基础设施（PG/Redis/样例数据/迁移）
+
+PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可用本仓库的 compose 起：
+`docker compose -f <repo>/infra/compose.yml up -d`（见 infra/，包含 PG+Redis 镜像）。以下按"已有 adaptix 容器"继续：
+
+```sh
+# 迁移（幂等，可重复执行）——三张迁移建出：控制面元数据/任务/审批表
+CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
+  < .scratch/ai-agent-platform/phase1/control-plane/migrations/001_init.sql
+... 002_tasks.sql ... 003_approvals.sql
+# 样例数据（试点报表场景）
+podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
+  < .scratch/ai-agent-platform/phase1/mcp-db-server/seed.sql   #（或按 mcp-db-server README 手建 demo_sales）
+```
+
+## 2. 启动控制面（API 网关/认证/会话/商店/审批/任务入口）
+
+```sh
+cd .scratch/ai-agent-platform/phase1/control-plane
+npm install --cache /Users/jac/sw_dir/dsh/.npm-cache   # 沙箱环境 npm 缓存指到工作区；普通环境可省略 --cache
+npm run build
+DATABASE_URL="$PG_DSN" node dist/main.js
+# → listening on http://127.0.0.1:4000 (auth=dev, orch=memory)
+```
+
+dev 登录（本地演示）：`GET /api/auth/dev/login?userId=u-admin`（或 u-dev-1 / u-hr-1）→ 返回 JWT。
+
+## 3. 启动任务 Worker（真实执行 Agent 任务）
+
+```sh
+cd dsh-source/packages/platform/task-worker
+export DATABASE_URL="$PG_DSN" DEEPSEEK_API_KEY="$NVIDIA_KEY"
+export DEEPSEEK_BASE_URL="https://integrate.api.nvidia.com/v1"
+./node_modules/.bin/tsx src/worker.ts
+# → [worker] ready (redis=..., concurrency=2, attempts=3, model=deepseek-ai/deepseek-v4-flash-0731)
+```
+
+Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`，内含知识库/数据库两个 MCP Server）。
+
+## 4. 启动商店 UI
+
+```sh
+cd .scratch/ai-agent-platform/phase2/agent-store/ui
+python3 -m http.server 8080 --bind 127.0.0.1
+# 浏览器打开 http://127.0.0.1:8080/index.html（或直接 file:// 打开该文件，CORS 已放行）
+```
+
+## 5. 演示流程
+
+### A. 商店浏览与选用
+- UI 里输入 `u-admin` → 登录
+- Agent 商店显示可见 Agent 卡片（模型路由徽标/审批级别）
+- 点「选用」→ 显示 sessionId + routingSecret（代理路由用）
+
+### B. 员工提审 → admin 批准（12 工单）
+- 提审区填 id/名称/描述/basedOn → 提交 → `draft`
+- 员工列表看不到 draft；admin 在「全部 Agent」里批准 → preset 文件生成到 `$DSH_HOME/presets-company/<id>/` + 上架 → 立即可见
+
+### C. 任务 + 审批门（14 工单）
+```sh
+# 1) 建 API key（内部系统触发身份）
+curl -X POST http://127.0.0.1:4000/api/admin/api-keys \
+  -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application/json" \
+  -d '{"name":"demo","scopes":["task:create"]}'        # 返回 apiKey（仅一次）
+# 2) 触发 report-builder 任务（approvalLevel=self → 先进审批，不入队）
+curl -X POST http://127.0.0.1:4000/api/service/trigger \
+  -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"task":"用 demo_sales 库查各区域销售总额","agentPresetId":"report-builder"}'
+# → accepted + taskId；任务 queued 但未入队（worker 无动静）
+# 3) UI 管理区「待审批」→ 批准 → 任务入队执行（数分钟，NVIDIA 模型较慢）
+# 4) 同 key 同任务再触发 → 授权存储命中（24h）→ 直接入队，不再审批
+```
+
+### D. 直接查任务状态
+```sh
+curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
+# done 的任务 result.finalResponse 是模型最终回答；审计链在 audit_events 表
+```
+
+## 6. 常用配置（env）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CP_PORT` | 4000 | 控制面端口 |
+| `CP_AUTH_MODE` | dev | `oidc` 走钉钉（需 `CP_OIDC_*`） |
+| `CP_ORCHESTRATOR` | memory | `docker` 时用 podman 起真实 DSH Web 容器（需 `CP_DSH_WEB_IMAGE`） |
+| `CP_TASK_TIMEOUT_MS` | 300000 | 任务超时（多轮工具任务建议 600000） |
+| `CP_TASK_ATTEMPTS` / `CP_TASK_BACKOFF_MS` | 3 / 3000 | 任务重试 |
+| `CP_WORKER_CONCURRENCY` | 2 | worker 并发（同用户串行不受影响） |
+| `CP_PRESET_ROOT` | `$DSH_HOME/presets-company` | 商店 preset 文件根 |
+| `CP_GRANT_HOURS` | 24 | 授权存储「记住 X 小时」 |
+
+## 7. 停止与清理
+
+```sh
+pkill -f "node dist/main.js"; pkill -f "tsx src/worker.ts"; pkill -f "http.server 8080"
+# 演示数据保留在 PG（tasks/approval_requests/agent_presets）；清库可 TRUNCATE 或重建 control_plane 库
+```
+
+## 已知注意点（2025-08-18 实测记录）
+
+1. **模型工具调用合规性**：deepseek-v4-flash-0731（NVIDIA）行为不稳定——部分轮次"假装调用工具、编造输出"（会话事件 tool/call=0）。管线与工具注册正常；若遇到编造答案，换模型（llama-3.3-70b 或私有 Qwen）或加强 persona。这是试点前需解决的模型选型问题（D13 GPU 到位后回归）。
+2. **多轮工具任务耗时**：3-5+ 分钟（慢模型×多轮）；默认 5min 超时可能不够，建议 `CP_TASK_TIMEOUT_MS=600000`。
+3. **同用户串行**：per-worker 进程内保证；多 worker 部署需 per-user 队列分区（当前单 worker 假设）。
+4. **沙箱环境**（本机开发）：npm 缓存用 `--cache <workdir>/.npm-cache`；`DSH_HOME` 指到工作区内的 `.dsh-home`。

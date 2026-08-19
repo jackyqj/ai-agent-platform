@@ -1,0 +1,11 @@
+# 运行时/环境
+node_modules/
+dist/
+data/
+*.log
+.env
+.DS_Store
+# 本机沙箱缓存与运行时数据（不入库）
+.npm-cache/
+.podman/
+.dsh-home/

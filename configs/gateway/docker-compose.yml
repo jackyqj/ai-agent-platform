@@ -1,0 +1,62 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_LOG: "INFO"
+      # 模型密钥一律从环境注入（配置文件中只有引用，见 D20）
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    command:
+      - "--config"
+      - "/app/config.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - gateway
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm
+    restart: unless-stopped
+    # GPU 节点（D13：8×A100/H100；资源到位前本服务可暂不起，云端路由先通）
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "8000:8000"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - model-cache:/root/.cache/huggingface
+    command:
+      - "--model"
+      - "${PRIVATE_MODEL:-Qwen/Qwen2.5-72B-Instruct}"
+      - "--served-model-name"
+      - "qwen-72b"
+      - "--tensor-parallel-size"
+      - "${TP_SIZE:-8}"
+      - "--max-model-len"
+      - "32768"
+    networks:
+      - gateway
+
+volumes:
+  model-cache:
+
+networks:
+  gateway:
+    driver: bridge

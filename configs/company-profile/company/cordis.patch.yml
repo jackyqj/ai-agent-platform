@@ -1,0 +1,69 @@
+# 公司覆盖层（applied after dsh-base + dsh-web-app bundles）
+#
+# 行按 id 整体替换 config（无深合并）：覆盖即完整重写该行。
+# 详见 dsh-source/packages/bundle/base/README.md Known Limitations。
+
+# ── 统一 persona（覆盖 web 的 coding persona）───────────────────────────────
+- id: system-prompt
+  config:
+    persona: >-
+      你是「公司 AI 助手」——公司内部统一部署的 AI Agent 平台上的助手。
+      你的用户是公司同事（含大量非技术背景同事），回答要直接、平实、可执行，避免术语堆砌。
+      你是"把活干完"的助手：能用工具查资料、算数据、生成文档就去做，做完汇报结果。
+      涉及公司数据时严格遵守数据分级：机密数据只能在私有模型路由下处理，绝不外传。
+      敏感操作（写数据库、对外发送）一律先走审批；超出能力或权限时明确说明，不编造。
+
+# ── 默认模型路由 ────────────────────────────────────────────────────────────
+# Phase 0（网关未上线）：使用官方 deepseek 适配器，密钥走 apiKeyEnv 引用。
+# 网关上线后（03 工单）切换为 pi-ai 路由：
+#   provider: gateway            # LiteLLM 在 pi-ai 配置中注册的路由名
+#   model: private/qwen-72b      # 敏感场景默认私有；通用场景在会话内可选云端
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash
+
+# ── 公司 Agent preset 根（Phase 2 Agent 商店雏形）───────────────────────────
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: assistant
+        roots:
+          - path: $DSH_HOME/presets-company   # 服务端只读挂载的公司目录
+            trust: system
+        includeUserRoot: false                 # 员工自建 preset 走提审，不直接开放
+
+# ── 共享会话存储（08 工单：PG 持久化替代 JSONL）────────────────────────────
+# 会话事件落 PostgreSQL（dsh_sessions schema），跨实例/跨设备可恢复。
+- id: session-persistence-jsonl
+  disabled: true
+- insert:
+    - id: session-persistence-pg
+      name: '@deepseek-ai/dsh-session-persistence-pg'
+      config:
+        url: !!js 'process.env.SESSION_PG_URL'   # 生产从密钥服务注入（D20）
+
+# ── 内部 MCP Server（04 工单的接入位，一个 Server 一行）────────────────────
+# Phase 0：stdio 模式（DSH 拉起子进程，内部单机首选）
+- id: mcp-kb
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: kb
+    transport: stdio
+    command: node
+    args: ['/Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/dist/index.js']
+    env:
+      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/docs
+      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/data/index.json
+      EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
+#
+# Phase 1+ 服务化升级：streamable-http（SDK HTTP 路径修复后启用，见 04 README 已知问题）
+# - id: mcp-db
+#   name: '@deepseek-ai/dsh-mcp-client'
+#   config:
+#     serverName: db
+#     transport: streamable-http
+#     url: http://127.0.0.1:8788/mcp
+#     headers:
+#       Authorization: !!js '`Bearer ${process.env.MCP_DB_TOKEN}`'

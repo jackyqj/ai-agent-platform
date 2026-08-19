@@ -1,0 +1,40 @@
+# LiteLLM 混合路由配置
+# 模型密钥全部来自环境变量（配置零秘密，见 D20）。
+# 模型名约定（给 DSH pi-ai 路由用）：
+#   private/qwen-72b   — 私有 vLLM，敏感数据（D18：机密数据钉死此路由）
+#   cloud/deepseek     — 云端 DeepSeek，通用场景
+#   cloud/qwen-plus    — 云端通义（可选）
+
+model_list:
+  # ── 私有路由（敏感场景强制）─────────────────────────────────────────────
+  # 端点/模型名 env 化：用户已部署的 Qwen 端点即插即用（VLLM_BASE_URL/VLLM_MODEL）
+  - model_name: private/qwen-72b
+    litellm_params:
+      model: openai/${VLLM_MODEL}
+      api_base: ${VLLM_BASE_URL}
+      api_key: os.environ/VLLM_API_KEY
+      rpm: 60                # 私有路由限流
+      max_tokens: 8192
+
+  # ── 云端路由（通用场景）─────────────────────────────────────────────────
+  - model_name: cloud/deepseek
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+      rpm: 120
+
+  - model_name: cloud/qwen-plus
+    litellm_params:
+      model: openai/qwen-plus
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      rpm: 120
+
+# 默认转发规则（可选）：无匹配模型名时拒绝，避免误走云端
+router_settings:
+  enable_pre_call_checks: true
+  routing_strategy: simple-shuffle
+
+# 用量日志：D15/16 工单的计量数据源（按 user 维度记账，配合 16 配额）
+# litellm_settings:
+#   success_callback: ["prometheus"]   # 或对接公司日志平台（D14）

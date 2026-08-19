@@ -1,0 +1,23 @@
+{
+  "name": "company-mcp-db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "公司只读数据库 MCP Server（试点场景：数据查询报表）——SELECT-only + 表白名单 + 上限，审批位预留（14 工单）",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "smoke": "tsx test/smoke.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "pg": "^8.13.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

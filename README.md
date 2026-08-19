@@ -12,7 +12,7 @@
 | `presets/` | Agent 商店 preset 源（assistant/hr-assistant/report-builder/doc-search） |
 | `web/store/` | 商店 + 管理静态 UI（无构建，浏览器打开） |
 | `configs/` | 公司 profile、LiteLLM 网关配置、persona |
-| `db/migrations/` | PostgreSQL 迁移（001 元数据 / 002 任务 / 003 审批 / 004 配额） |
+| `apps/control-plane/migrations/` | PostgreSQL 迁移（001 元数据 / 002 任务 / 003 审批 / 004 配额） |
 | `docs/` | 架构（spec/enterprise-shell）、调研、工单（issues/）、运行指引（RUN-LOCALLY.md）、状态（STATUS.md） |
 | `infra/` | 基础设施 compose（PG/Redis/OTel） |
 | `deps/README.md` | **DSH 耦合组件**的链接说明（重要） |

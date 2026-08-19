@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { loadConfig } from '../config/config.js'
 import { AuditStore } from '../common/audit.store.js'
@@ -14,11 +14,12 @@ export type AuthMode = 'dev' | 'oidc'
  *   钉钉是自定义 OAuth（无 OIDC discovery），走其专有端点：
  *   授权 https://login.dingtalk.com/oauth2/auth
  *   换票 https://api.dingtalk.com/v1.0/oauth2/userAccessToken
- *   用户信息 https://api.dingtalk.com/v1.0/contact/users/me
+ *   用户信息 https://api.dingtalk.com/v1.0/contact/users/me（需通讯录权限，403 时降级老版免登接口）
  *   state 用 JWT 签名（防 CSRF），回调校验。
  */
 @Injectable()
 export class AuthService {
+  private logger = new Logger('Auth')
   private cfg = loadConfig()
 
   private static readonly AUTH_URL = 'https://login.dingtalk.com/oauth2/auth'
@@ -83,7 +84,8 @@ export class AuthService {
     const externalId = String(profile.unionId ?? '')
     if (!externalId) throw new Error('钉钉 userinfo 缺少 unionId')
     const name = String(profile.nick ?? externalId)
-    const user = this.users.upsert({ externalId, name, dept: String(profile.dept ?? '未知部门') })
+    // 部门：OAuth userinfo 不返回部门（组织架构同步补齐前，角色走 D12 关键词/覆盖表）
+    const user = this.users.upsert({ externalId, name, dept: '未知部门' })
     const token = this.issueToken(this.users.toAuthUser(user))
     this.audit.append({ userId: user.id, eventType: 'auth.login', payload: { mode: 'oidc', externalId } })
     return { user: this.users.toAuthUser(user), accessToken: token.accessToken }
@@ -112,11 +114,30 @@ export class AuthService {
     return json as unknown as { accessToken: string; refreshToken?: string; expireIn?: number }
   }
 
-  private async fetchUserInfo(accessToken: string): Promise<Record<string, string>> {
-    const res = await fetch(AuthService.USERINFO_URL, {
-      headers: { 'x-acs-dingtalk-access-token': accessToken },
-    })
-    if (!res.ok) throw new Error(`钉钉 userinfo 失败: HTTP ${res.status}`)
-    return (await res.json()) as Record<string, string>
+  /**
+   * 拉取登录用户信息（身份键 = unionId）。
+   * 1) 新版 /v1.0/contact/users/me：信息全（nick/avatar），但需应用开通「通讯录个人信息读权限」；
+   * 2) 兜底老版免登 oapi.dingtalk.com/user/getuserinfo：仅 unionid/userid，权限要求低（免登场景默认可用）。
+   * 403（权限未开通）时自动降级，不再阻塞登录。
+   */
+  private async fetchUserInfo(accessToken: string): Promise<{ unionId: string; nick?: string; userId?: string }> {
+    try {
+      const res = await fetch(AuthService.USERINFO_URL, {
+        headers: { 'x-acs-dingtalk-access-token': accessToken },
+      })
+      if (res.ok) {
+        const json = (await res.json()) as { unionId?: string; nick?: string }
+        if (json.unionId) return { unionId: json.unionId, nick: json.nick }
+      }
+      this.logger.warn(`users/me 不可用（HTTP ${res.status}），降级老版免登接口`)
+    } catch {
+      this.logger.warn('users/me 异常，降级老版免登接口')
+    }
+    const res = await fetch(`https://oapi.dingtalk.com/user/getuserinfo?access_token=${encodeURIComponent(accessToken)}`)
+    const json = (await res.json()) as { errcode?: number; errmsg?: string; unionid?: string; userid?: string }
+    if (json.errcode !== 0 || !json.unionid) {
+      throw new Error(`钉钉 userinfo 失败: errcode=${json.errcode} ${json.errmsg ?? ''}（若为权限错误，请在开发者后台申请「通讯录个人信息读权限」）`)
+    }
+    return { unionId: json.unionid, userId: json.userid }
   }
 }

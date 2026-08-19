@@ -37,7 +37,7 @@
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |
 | 18 IM 机器人 | Phase 3 | 钉钉（D8）凭证 + 19 队列（已通） |
 | 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测） | 时区/完整 cron/失败告警 |
-| 21 工作流模板 | Phase 3 | 子代理编排（DSH 原生，可复用） |
+| 21 工作流模板 | ✅ 运行时装配（workflow/subagent 全套）+ 3 个模板库；管线通 | 完整端到端验证（等 Qwen 回归）；模板引用接线 |
 | 22 反馈闭环 | Phase 3 | 试点数据 |
 | 23 全量推广 | Phase 3 | 试点结果 + 培训材料 |
 

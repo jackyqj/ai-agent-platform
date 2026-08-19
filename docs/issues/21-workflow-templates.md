@@ -28,3 +28,10 @@ spec §5 Phase 3「复杂工作流：子代理编排模板（报表生成、周�
 - [ ] ≥1 个模板被业务方实际投入使用
 
 ## Comments
+
+> 2025-08-19：**工作流能力就绪 + 模板库完成**。
+> - **运行时装配**：worker.cordis.yml 挂载 DSH 原生子代理+工作流全套（subagent/spawn/fork providers、tool-subagent/control/report、workflow-worker-thread、tool-workflow、timeout-policy），boot 验证通过；会话上下文确认工具已注册（workflow/subagent/subagent_fork/send_message/list_agents/interrupt_agent）
+> - **模板库**：templates/workflows/ 3 个高频模板（周报汇总/多源报表/跨源收集），每份含触发语、workflow 脚本建议（parallel/pipeline 用法）、输出要求
+> - **管线验证**：任务入队→worker 执行→多轮对话链路通
+> - ⚠️ **执行时长受限（模型拖累）**：演示任务 8+ 分钟未完成（NVIDIA 慢模型 × 多轮 + 子代理扇出）；与工具调用可靠性问题同源——**私有 Qwen 接入后回归完整验证**（这正是 Qwen 回归的又一论据）
+> 遗留：Qwen 回归后的完整端到端验证（含真实扇出证据）；模板与 preset/定时任务的引用接线（taskTemplate 指向模板）；执行结果推送（18）。

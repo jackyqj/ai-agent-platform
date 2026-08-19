@@ -42,4 +42,10 @@ spec ADR-2：认证完全放在反向代理层（企业微信/钉钉/飞书 OAut
 >   正确 key+scope → 放行（含审计 task.triggered）；错误/撤销/无 key → 401；缺 scope → 403
 > - 受保护示例路由 `POST /api/service/trigger`（scope=task:create，19 工单任务入口占位）
 > - api_keys 表（PG）已用：明文不落库，撤销即时生效
-> 遗留：钉钉凭证接入、组织架构定时同步（仍待）。
+> 2025-08-19：**钉钉 OAuth 真实验证完成（真实凭证）**。`auth.service.ts` 从通用 `openid-client` 发现式改为钉钉原生三端点流程：
+> - 授权 URL：`https://login.dingtalk.com/oauth2/auth`（scope=openid + prompt=consent + **JWT 签名 state** 防 CSRF）——实测 302 正确
+> - 换票：`POST /v1.0/oauth2/userAccessToken`（clientId/clientSecret/grantType）——实测直连钉钉，无效 code 透传「不合法的临时授权码」
+> - 用户信息：`GET /v1.0/contact/users/me`（unionId/nick）——身份键 = unionId
+> - callback 校验 state：伪造 state → 401「CSRF check failed」
+> - `openid-client` 依赖移除
+> 遗留：**浏览器真授权**（需在钉钉开发者后台配置「登录回调域名」指向控制面 `/api/auth/sso/callback`）、组织架构定时同步（部门→角色仍走 D12 关键词/覆盖表）。

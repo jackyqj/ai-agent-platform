@@ -31,12 +31,12 @@ export class AuthController {
     }
   }
 
-  /** oidc 模式：回调换票 */
+  /** oidc 模式：回调换票（state 防 CSRF） */
   @Get('auth/sso/callback')
-  async ssoCallback(@Query('code') code?: string) {
+  async ssoCallback(@Query('code') code?: string, @Query('state') state?: string) {
     if (!code) throw new HttpException('missing code', HttpStatus.BAD_REQUEST)
     try {
-      return await this.auth.oidcCallback(code)
+      return await this.auth.oidcCallback(code, state)
     } catch (e) {
       throw new HttpException(`oidc callback failed: ${(e as Error).message}`, HttpStatus.UNAUTHORIZED)
     }

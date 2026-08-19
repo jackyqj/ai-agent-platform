@@ -14,8 +14,8 @@
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-fastify": "^10.4.0",
     "bullmq": "^6.1.2",
+    "dingtalk-stream": "^2.1.6-beta.1",
     "ioredis": "^6.0.0",
-    "openid-client": "^5.7.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

@@ -12,6 +12,12 @@ export interface AppConfig {
     redirectUri: string
     scope: string
   }
+  /** 钉钉 IM 机器人（18 工单）——默认复用 OIDC 凭证；CP_IM_ENABLED 时生效 */
+  dingtalk: {
+    clientId: string
+    clientSecret: string
+    robotCode: string
+  }
   /** 部门名 → 角色 映射（D12 部门标签驱动），逗号分隔：IT:developer,R&D:developer,Admin:admin */
   roleMapByDept: Record<string, string>
   /** 实例编排器：memory（开发/冒烟）| docker（生产） */
@@ -42,7 +48,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       clientId: env.CP_OIDC_CLIENT_ID ?? '',
       clientSecret: env.CP_OIDC_CLIENT_SECRET ?? '',
       redirectUri: env.CP_OIDC_REDIRECT_URI ?? 'http://127.0.0.1:4000/api/auth/sso/callback',
-      scope: env.CP_OIDC_SCOPE ?? 'openid profile',
+      scope: env.CP_OIDC_SCOPE ?? 'openid',
+    },
+    dingtalk: {
+      clientId: env.CP_DINGTALK_CLIENT_ID ?? env.CP_OIDC_CLIENT_ID ?? '',
+      clientSecret: env.CP_DINGTALK_CLIENT_SECRET ?? env.CP_OIDC_CLIENT_SECRET ?? '',
+      robotCode: env.CP_DINGTALK_ROBOT_CODE ?? '',
     },
     roleMapByDept: csvMap(env.CP_ROLE_MAP_BY_DEPT),
     orchestrator: (env.CP_ORCHESTRATOR ?? 'memory') as AppConfig['orchestrator'],

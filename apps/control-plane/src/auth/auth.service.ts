@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
-import { Issuer, generators } from 'openid-client'
 import { loadConfig } from '../config/config.js'
 import { AuditStore } from '../common/audit.store.js'
 import { UsersService } from '../users/users.service.js'
@@ -11,12 +10,20 @@ export type AuthMode = 'dev' | 'oidc'
 /**
  * 认证服务（07 工单 + D8/D12）：
  * - dev 模式：/auth/dev/login 直接签发 JWT（本地开发/冒烟）
- * - oidc 模式：钉钉 OIDC 授权码流程（/auth/sso/login → 重定向 IDP → callback 换票）
- *   钉钉为自定义 OAuth，接入时用其 OIDC 兼容端点配置（issuer/clientId/secret）
+ * - oidc 模式：钉钉企业内应用 OAuth 授权码流程（CP_OIDC_* 配置）
+ *   钉钉是自定义 OAuth（无 OIDC discovery），走其专有端点：
+ *   授权 https://login.dingtalk.com/oauth2/auth
+ *   换票 https://api.dingtalk.com/v1.0/oauth2/userAccessToken
+ *   用户信息 https://api.dingtalk.com/v1.0/contact/users/me
+ *   state 用 JWT 签名（防 CSRF），回调校验。
  */
 @Injectable()
 export class AuthService {
   private cfg = loadConfig()
+
+  private static readonly AUTH_URL = 'https://login.dingtalk.com/oauth2/auth'
+  private static readonly TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/userAccessToken'
+  private static readonly USERINFO_URL = 'https://api.dingtalk.com/v1.0/contact/users/me'
 
   constructor(
     private readonly jwt: JwtService,
@@ -41,33 +48,75 @@ export class AuthService {
     return { user: u, ...token }
   }
 
-  /** oidc 模式：构造授权 URL（用 openid-client 发现端点） */
-  async buildAuthUrl(): Promise<string> {
-    const client = await this.client()
-    const state = generators.state()
-    const nonce = generators.nonce()
-    return client.authorizationUrl({ scope: this.cfg.oidc.scope, state, nonce })
+  /**
+   * oidc 模式：构造钉钉授权 URL。
+   * state 为 JWT 签名值（10 分钟），回调时校验防 CSRF。
+   */
+  buildAuthUrl(): string {
+    const { clientId, clientSecret, redirectUri } = this.cfg.oidc
+    if (!clientId || !clientSecret) {
+      throw new Error('oidc not configured (CP_OIDC_CLIENT_ID / CP_OIDC_CLIENT_SECRET)')
+    }
+    const state = this.jwt.sign({ nonce: Math.random().toString(36).slice(2) }, {
+      secret: this.cfg.jwtSecret,
+      expiresIn: '10m',
+    })
+    const params = new URLSearchParams({
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      client_id: clientId,
+      scope: 'openid',
+      state,
+      prompt: 'consent',
+    })
+    return `${AuthService.AUTH_URL}?${params.toString()}`
   }
 
-  /** oidc 模式：回调换票 + 身份映射 + JWT 签发 */
-  async oidcCallback(code: string): Promise<{ user: AuthUser; accessToken: string }> {
-    const client = await this.client()
-    const tokens = await client.callback(this.cfg.oidc.redirectUri, { code })
-    const claims = tokens.claims()
-    const externalId = String(claims.sub ?? claims.unionid ?? '')
-    if (!externalId) throw new Error('oidc: missing sub claim')
-    const name = String(claims.name ?? externalId)
-    const dept = String((claims as Record<string, unknown>).department ?? '未知部门')
-    const user = this.users.upsert({ externalId, name, dept })
+  /**
+   * oidc 模式：回调换票 + 身份映射 + JWT 签发。
+   * 钉钉流程：code → userAccessToken（clientId/clientSecret/grantType）→ users/me（unionId/nick）。
+   */
+  async oidcCallback(code: string, state?: string): Promise<{ user: AuthUser; accessToken: string }> {
+    this.verifyState(state)
+    const tokens = await this.exchangeCode(code)
+    const profile = await this.fetchUserInfo(tokens.accessToken)
+    const externalId = String(profile.unionId ?? '')
+    if (!externalId) throw new Error('钉钉 userinfo 缺少 unionId')
+    const name = String(profile.nick ?? externalId)
+    const user = this.users.upsert({ externalId, name, dept: String(profile.dept ?? '未知部门') })
     const token = this.issueToken(this.users.toAuthUser(user))
     this.audit.append({ userId: user.id, eventType: 'auth.login', payload: { mode: 'oidc', externalId } })
     return { user: this.users.toAuthUser(user), accessToken: token.accessToken }
   }
 
-  private async client() {
-    const { issuer, clientId, clientSecret, redirectUri } = this.cfg.oidc
-    if (!issuer || !clientId || !clientSecret) throw new Error('oidc not configured (CP_OIDC_*)')
-    const discovered = await Issuer.discover(issuer)
-    return new discovered.Client({ client_id: clientId, client_secret: clientSecret, redirect_uris: [redirectUri] })
+  private verifyState(state?: string) {
+    if (!state) throw new Error('oidc: missing state (CSRF check failed)')
+    try {
+      this.jwt.verify(state, { secret: this.cfg.jwtSecret })
+    } catch {
+      throw new Error('oidc: invalid state (CSRF check failed)')
+    }
+  }
+
+  private async exchangeCode(code: string): Promise<{ accessToken: string; refreshToken?: string; expireIn?: number }> {
+    const { clientId, clientSecret } = this.cfg.oidc
+    const res = await fetch(AuthService.TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, clientSecret, code, grantType: 'authorization_code' }),
+    })
+    const json = (await res.json()) as Record<string, string>
+    if (!json.accessToken) {
+      throw new Error(`钉钉换票失败: ${json.message ?? json.error ?? `HTTP ${res.status}`}`)
+    }
+    return json as unknown as { accessToken: string; refreshToken?: string; expireIn?: number }
+  }
+
+  private async fetchUserInfo(accessToken: string): Promise<Record<string, string>> {
+    const res = await fetch(AuthService.USERINFO_URL, {
+      headers: { 'x-acs-dingtalk-access-token': accessToken },
+    })
+    if (!res.ok) throw new Error(`钉钉 userinfo 失败: HTTP ${res.status}`)
+    return (await res.json()) as Record<string, string>
   }
 }

@@ -4,6 +4,7 @@
 
 > 环境事实：macOS，Node v26.5.0，pnpm 11.21；podman 容器运行时；`adaptix-postgres`（PG16）/`adaptix-redis` 已在运行。
 > 模型：NVIDIA OpenAI 兼容端点（`deepseek-ai/deepseek-v4-flash-0731`），API key 由你提供（生产走 D20 密钥服务）。
+> 仓库布局（2025-08 迁移后）：控制面 `apps/control-plane`、知识库 MCP `services/mcp-kb`、数据库 MCP `services/mcp-db`、商店 UI `web/store`、迁移在 `apps/control-plane/migrations`。
 
 ## 0. 前置
 
@@ -22,26 +23,48 @@ PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可�
 `docker compose -f <repo>/infra/compose.yml up -d`（见 infra/，包含 PG+Redis 镜像）。以下按"已有 adaptix 容器"继续：
 
 ```sh
-# 迁移（幂等，可重复执行）——三张迁移建出：控制面元数据/任务/审批表
+# 迁移（幂等，可重复执行）——迁移脚本在控制面包内
 CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
-  < .scratch/ai-agent-platform/phase1/control-plane/migrations/001_init.sql
-... 002_tasks.sql ... 003_approvals.sql
+  < apps/control-plane/migrations/001_init.sql
+... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql
 # 样例数据（试点报表场景）
 podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
-  < .scratch/ai-agent-platform/phase1/mcp-db-server/seed.sql   #（或按 mcp-db-server README 手建 demo_sales）
+  < services/mcp-db/seed.sql   #（或按 mcp-db README 手建 demo_sales）
 ```
 
 ## 2. 启动控制面（API 网关/认证/会话/商店/审批/任务入口）
 
 ```sh
-cd .scratch/ai-agent-platform/phase1/control-plane
-npm install --cache /Users/jac/sw_dir/dsh/.npm-cache   # 沙箱环境 npm 缓存指到工作区；普通环境可省略 --cache
-npm run build
+cd apps/control-plane
+npm install
+npm run build          # ⚠️ 必须用 tsc 构建产物启动（npm start）；不要用 `tsx src/main.ts` 跑 dev——
+                       # tsx(esbuild) 不发射 decorator 元数据，Nest 构造注入会全部变 undefined（详见"已知注意点 5"）
 DATABASE_URL="$PG_DSN" node dist/main.js
 # → listening on http://127.0.0.1:4000 (auth=dev, orch=memory)
 ```
 
 dev 登录（本地演示）：`GET /api/auth/dev/login?userId=u-admin`（或 u-dev-1 / u-hr-1）→ 返回 JWT。
+
+### 2.5 钉钉 SSO + IM 机器人（07/18 工单，可选）
+
+```sh
+# 认证切钉钉（生产模式）：授权 URL 302 → 钉钉 → 回调换票（需在钉钉后台配置「登录回调域名」）
+export CP_AUTH_MODE=oidc
+export CP_OIDC_CLIENT_ID='ding...'  CP_OIDC_CLIENT_SECRET='...'
+export CP_OIDC_REDIRECT_URI='http://<控制面域名>/api/auth/sso/callback'
+
+# IM 机器人（Stream 模式；默认复用 CP_OIDC_* 凭证，也可用 CP_DINGTALK_* 单独指定）
+# 控制面启动后自动建立长连接（日志出现「钉钉 Stream 已连接」即在线）
+```
+
+排障/演示（无需真实钉钉群）：
+```sh
+curl -H "Authorization: Bearer $ADMIN_JWT" http://127.0.0.1:4000/api/admin/im/status
+# → {"enabled":true,"streamConnected":true,"tracked":0,...}
+curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application/json" \
+  -d '{"text":"公司请假的制度是什么？","sessionWebhook":"http://127.0.0.1:4100/sink"}' \
+  http://127.0.0.1:4000/api/admin/im/simulate   # sessionWebhook 指向自建 sink 可捕获回推
+```
 
 ## 3. 启动任务 Worker（真实执行 Agent 任务）
 
@@ -58,7 +81,7 @@ Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`�
 ## 4. 启动商店 UI
 
 ```sh
-cd .scratch/ai-agent-platform/phase2/agent-store/ui
+cd web/store
 python3 -m http.server 8080 --bind 127.0.0.1
 # 浏览器打开 http://127.0.0.1:8080/index.html（或直接 file:// 打开该文件，CORS 已放行）
 ```
@@ -101,6 +124,9 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 |---|---|---|
 | `CP_PORT` | 4000 | 控制面端口 |
 | `CP_AUTH_MODE` | dev | `oidc` 走钉钉（需 `CP_OIDC_*`） |
+| `CP_OIDC_CLIENT_ID` / `CP_OIDC_CLIENT_SECRET` | — | 钉钉企业内部应用凭证（SSO 换票） |
+| `CP_OIDC_REDIRECT_URI` | `http://127.0.0.1:4000/api/auth/sso/callback` | 钉钉回调（须在钉钉后台登记域名） |
+| `CP_DINGTALK_CLIENT_ID` / `CP_DINGTALK_CLIENT_SECRET` | 复用 `CP_OIDC_*` | IM 机器人凭证（Stream 模式） |
 | `CP_ORCHESTRATOR` | memory | `docker` 时用 podman 起真实 DSH Web 容器（需 `CP_DSH_WEB_IMAGE`） |
 | `CP_TASK_TIMEOUT_MS` | 300000 | 任务超时（多轮工具任务建议 600000） |
 | `CP_TASK_ATTEMPTS` / `CP_TASK_BACKOFF_MS` | 3 / 3000 | 任务重试 |
@@ -115,9 +141,11 @@ pkill -f "node dist/main.js"; pkill -f "tsx src/worker.ts"; pkill -f "http.serve
 # 演示数据保留在 PG（tasks/approval_requests/agent_presets）；清库可 TRUNCATE 或重建 control_plane 库
 ```
 
-## 已知注意点（2025-08-18 实测记录）
+## 已知注意点（2025-08-19 实测记录）
 
 1. **模型工具调用合规性**：deepseek-v4-flash-0731（NVIDIA）行为不稳定——部分轮次"假装调用工具、编造输出"（会话事件 tool/call=0）。管线与工具注册正常；若遇到编造答案，换模型（llama-3.3-70b 或私有 Qwen）或加强 persona。这是试点前需解决的模型选型问题（D13 GPU 到位后回归）。
 2. **多轮工具任务耗时**：3-5+ 分钟（慢模型×多轮）；默认 5min 超时可能不够，建议 `CP_TASK_TIMEOUT_MS=600000`。
 3. **同用户串行**：per-worker 进程内保证；多 worker 部署需 per-user 队列分区（当前单 worker 假设）。
-4. **沙箱环境**（本机开发）：npm 缓存用 `--cache <workdir>/.npm-cache`；`DSH_HOME` 指到工作区内的 `.dsh-home`。
+4. **沙箱环境**（本机开发）：`DSH_HOME` 指到工作区内的 `.dsh-home`。
+5. **控制面 dev 脚本不可用**：`npm run dev`（tsx watch）会因 tsx/esbuild 不发射 `design:paramtypes` 装饰器元数据导致全部构造注入为 undefined（表现为 `Cannot read properties of undefined (reading 'pool')` 之类的启动崩溃）。**一律 `npm run build && npm start`**（tsc 产物）。
+6. **钉钉回调域名**：SSO 浏览器授权前，须在钉钉开发者后台为应用配置「登录回调域名」（指向控制面 `/api/auth/sso/callback` 的域名）；Stream 机器人无需回调域名，但需在「应用能力-机器人」开通 Stream 模式并发布，且机器人要拉进群后才能收到 @消息。

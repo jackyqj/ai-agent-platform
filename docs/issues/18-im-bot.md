@@ -28,3 +28,11 @@ spec §3.2 典型交互：员工在**钉钉** @机器人 → 机器人回调控�
 - [ ] 长任务结束后主动推送结果
 
 ## Comments
+
+> 2025-08-19：**钉钉 Stream 模式机器人接入完成（真实凭证实测）**。`apps/control-plane/src/im/`：
+> - `dingtalk-stream` 官方 SDK 长连接（自动重连/ack）：`dingtalk-stream.service.ts`，boot 后 `connected=true` 实测在线
+> - 入站桥接：`im.service.ts` —— @消息 → staffId→unionId（通讯录接口，失败退化为 `ding:staffId`）→ 身份 upsert（与 Web SSO 同键）→ 关键词 preset 路由（4 场景对齐 D19）→ 任务入队 → 即时「已受理」回执；`conversationType` 审计
+> - 出站推送：30s 轮询跟踪任务终态（done/failed/killed）→ 主动推 markdown 结果到原会话（sink 捕获实测：受理→完成两段推送全通）
+> - 安全：敏感操作分层守卫（硬性动词拒绝 + 歧义动词咨询语境放行，8/8 单测）；审批类操作引导 Web（配合 14）
+> - 管理端点：`GET /api/admin/im/status`（在线/跟踪数）、`POST /api/admin/im/simulate`（不依赖钉钉群的排障入口）
+> 遗留：**真实群 @ 验收**（把机器人拉进群实测）、worker 执行质量（等 Qwen 回归，同 19/21）。

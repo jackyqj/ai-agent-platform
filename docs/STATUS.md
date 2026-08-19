@@ -11,7 +11,7 @@
 | 02 公司 profile | persona/模型路由/presets 根/MCP 行/共享存储接线 | dump-config 组合正确 | 网关路由切换（等 03）、危险工具收敛（13） |
 | 04 首个 MCP Server | company-mcp-kb（stdio） | SDK 冒烟 + DSH 挂载 + M0 工具调用 | streamable-http 服务化（SDK Node26 已知问题） |
 | 06 控制面骨架 | 认证/会话/实例编排（podman 真容器）/代理三重校验/审计 | 登录→容器→ready→转发→审计→回收全闭环 | 实例落 PG 已完成（08）；WebSocket 升级 |
-| 07 SSO 网关 | 平台 JWT/角色守卫/API Key 服务身份 | employee→admin 403；key 签发/撤销/scope 全验 | **钉钉凭证**、组织架构同步 |
+| 07 SSO 网关 | 平台 JWT/角色守卫/API Key 服务身份；**钉钉 OAuth 原生接入真验**（授权 URL 302 / CSRF state 校验 / 换票端点直连，错误透传"不合法的临时授权码"） | employee→admin 403；key 签发/撤销/scope 全验；SSO 302→钉钉；callback 401 干净 | 浏览器真授权（需配置回调域名）、组织架构同步 |
 | 08 共享会话存储 | 控制面元数据落 PG + DSH SessionPersistence PG Provider | 重启恢复；事件链入 PG；**71/71 测试 + 覆盖率 100%** | 跨实例续聊验收；doc-sync 等上游门禁 |
 | 12 Agent 商店 | 4 个真实 preset + 目录服务（PG）+ 提审流程 + 静态 UI | dsh-agent-presets 发现全过；draft→批准→文件生成→上架 | 前端商店 UI 已出静态版（无构建）；配额档（16） |
 | 14 审批流 | 授权存储 + 任务前置审批门 | 触发→pending→批准→入队；授权存储命中 | 多级审批、DSH 原生 seam 深层挂钩 |
@@ -35,7 +35,7 @@
 | 15 审计看板 | ✅ 用量聚合 API + 看板 UI（任务/失败/Agent/配额/错误） | token 成本口径 + OTel 全链路（等 03 网关/日志平台） |
 | 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 | token/成本记账（等 03 网关）；warn 告警通道 |
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |
-| 18 IM 机器人 | Phase 3 | 钉钉（D8）凭证 + 19 队列（已通） |
+| 18 IM 机器人 | **✅ Stream 模式机器人实连 + 桥接全链路**：官方 SDK 长连接（真实凭证 connected=true）、@消息→身份解析→preset 路由→任务入队→受理回执→终态主动推送（sink 捕获实测）；敏感操作分层守卫（8/8 单测） | im/status 在线；simulate 路由/入队/回推全通 | 真实群 @ 验收（需把机器人拉进群）、worker 执行质量（等 Qwen 回归） |
 | 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测） | 时区/完整 cron/失败告警 |
 | 21 工作流模板 | ✅ 运行时装配（workflow/subagent 全套）+ 3 个模板库；管线通 | 完整端到端验证（等 Qwen 回归）；模板引用接线 |
 | 22 反馈闭环 | Phase 3 | 试点数据 |
@@ -46,10 +46,11 @@
 钉钉 SSO / Node+TS 控制面 / Docker 起步 / LiteLLM / PG 单库多 schema / 审计 180 天 /
 pgvector+bge-m3 / 数据分级路由强制 / 试点 4 场景 / 自建密钥服务 / **PG Provider 平台自有（D21，待正式版后重评）**。
 
-## 待真人/外部（5 项）
+## 待真人/外部（4 项）
 
 1. 试点人选名单（D19 构成）——阻塞 05/11
 2. 安全评审对接人（D18）
-3. 钉钉应用凭证（CP_OIDC_*）——阻塞 07 真验 + 18
+3. **钉钉回调域名配置 + 真实群 @ 验收**（凭证已接入：OIDC 与 Stream 均实测在线；浏览器授权 + 群机器人拉群需真人）
 4. GPU 采购（D13）——阻塞 03 + 私有模型回归（工具调用可靠性）
-5. 模型 key 轮换（测试用 NVIDIA key，生产走 D20）
+
+> 注：模型 key 轮换（测试用 NVIDIA key，生产走 D20）仍待办。

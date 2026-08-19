@@ -7,13 +7,14 @@ import { InstancesModule } from './instances/instances.module.js'
 import { AgentsModule } from './agents/agents.module.js'
 import { KeysModule } from './keys/keys.module.js'
 import { QuotaModule } from './quota/quota.module.js'
+import { ScheduledModule } from './scheduled/scheduled.module.js'
 import { TasksModule } from './tasks/tasks.module.js'
 import { AuditController } from './audit/audit.controller.js'
 import { StatsController } from './stats/stats.controller.js'
 import { ProxyController } from './proxy/proxy.controller.js'
 
 @Module({
-  imports: [CommonModule, AuthModule, UsersModule, SessionsModule, InstancesModule, AgentsModule, KeysModule, TasksModule, QuotaModule],
+  imports: [CommonModule, AuthModule, UsersModule, SessionsModule, InstancesModule, AgentsModule, KeysModule, TasksModule, QuotaModule, ScheduledModule],
   controllers: [AuditController, StatsController, ProxyController],
 })
 export class AppModule {}

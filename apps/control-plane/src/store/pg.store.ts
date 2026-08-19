@@ -421,4 +421,64 @@ export class PgStore {
       },
     }
   }
+
+  // --- 20：定时 Agent（scheduled_tasks 表） ---
+
+  async insertScheduledTask(t: { id: string; ownerUserId: string; name: string; agentPresetId: string; schedule: string; taskTemplate: string; nextRunAt: string }): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO scheduled_tasks (id, owner_user_id, name, agent_preset_id, schedule, task_template, next_run_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [t.id, t.ownerUserId, t.name, t.agentPresetId, t.schedule, t.taskTemplate, t.nextRunAt],
+    )
+  }
+
+  async listScheduledTasks(ownerUserId?: string): Promise<Record<string, unknown>[]> {
+    const res = ownerUserId
+      ? await this.pool!.query(
+          `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
+                  task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
+           FROM scheduled_tasks WHERE owner_user_id = $1 ORDER BY created_at DESC`,
+          [ownerUserId],
+        )
+      : await this.pool!.query(
+          `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
+                  task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
+           FROM scheduled_tasks ORDER BY created_at DESC`,
+        )
+    return res.rows
+  }
+
+  async getScheduledTask(id: string) {
+    const res = await this.pool!.query(
+      `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
+              task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
+       FROM scheduled_tasks WHERE id = $1`,
+      [id],
+    )
+    return res.rows[0] ?? undefined
+  }
+
+  async updateScheduledTask(id: string, p: { status?: string; lastRunAt?: string; nextRunAt?: string }): Promise<void> {
+    const sets: string[] = []
+    const args: unknown[] = []
+    if (p.status) { args.push(p.status); sets.push(`status = $${args.length}`) }
+    if (p.lastRunAt) { args.push(p.lastRunAt); sets.push(`last_run_at = $${args.length}`) }
+    if (p.nextRunAt) { args.push(p.nextRunAt); sets.push(`next_run_at = $${args.length}`) }
+    if (sets.length === 0) return
+    args.push(id)
+    await this.pool!.query(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = $${args.length}`, args)
+  }
+
+  async deleteScheduledTask(id: string): Promise<void> {
+    await this.pool!.query(`DELETE FROM scheduled_tasks WHERE id = $1`, [id])
+  }
+
+  async dueScheduledTasks(now: string): Promise<{ id: string; ownerUserId: string; agentPresetId: string; taskTemplate: string }[]> {
+    const res = await this.pool!.query(
+      `SELECT id, owner_user_id AS "ownerUserId", agent_preset_id AS "agentPresetId", task_template AS "taskTemplate"
+       FROM scheduled_tasks WHERE status = 'active' AND next_run_at <= $1 ORDER BY next_run_at LIMIT 20`,
+      [now],
+    )
+    return res.rows
+  }
 }

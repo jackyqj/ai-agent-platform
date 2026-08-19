@@ -28,3 +28,10 @@ spec §5 Phase 3「定时 Agent（基于 `dsh-schedule` 或控制面 cron）」�
 - [ ] 至少 1 个高频场景（如周报）跑通并进入 05 场景清单验证
 
 ## Comments
+
+> 2025-08-19：**定时 Agent 完成并实测**（src/scheduled/）。
+> - 迁移 005：scheduled_tasks 表（owner/agent_preset/schedule/task_template/status/next_run_at）
+> - 调度：每分钟 tick 查到期 → 复用任务队列（submit 含配额+审批门）→ 滚动 next_run_at；格式 'daily HH:MM' | 'every <N>m/h'
+> - API：创建/我的列表/run-now/暂停恢复/删除 + admin 全量（PermissionGuard）
+> - 实测：创建 every 1m → run-now 入队执行；tick 自动触发（1/1，任务数 2，scheduled.fired 审计）；暂停后不触发；report-builder 定时任务触发 → 审批 pending（不入队，等待授权）
+> 遗留：时区（当前服务器本地）；cron 完整表达式；执行失败告警；与 18 IM 的结果推送联动。

@@ -96,6 +96,39 @@ export class UsersService {
     if (u) u.role = role
   }
 
+  /** 管理后台：启用/禁用、部门、角色覆盖（10 工单） */
+  patch(userId: string, input: { status?: User['status']; role?: User['role']; dept?: string }): User | undefined {
+    const u = this.users.get(userId)
+    if (!u) return undefined
+    if (input.dept !== undefined) u.dept = input.dept
+    if (input.role !== undefined) {
+      switch (input.role) {
+        case 'employee':
+        case 'developer':
+        case 'admin':
+          this.setRoleOverride(userId, input.role)
+          break
+        default: {
+          const _exhaustive: never = input.role
+          throw new Error(`unknown role: ${_exhaustive}`)
+        }
+      }
+    }
+    if (input.status !== undefined) {
+      switch (input.status) {
+        case 'active':
+        case 'disabled':
+          u.status = input.status
+          break
+        default: {
+          const _exhaustive: never = input.status
+          throw new Error(`unknown status: ${_exhaustive}`)
+        }
+      }
+    }
+    return u
+  }
+
   toAuthUser(u: User): AuthUser {
     return { sub: u.id, role: u.role, dept: u.dept }
   }

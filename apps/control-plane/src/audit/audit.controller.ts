@@ -12,10 +12,11 @@ export class AuditController {
   @Get('events')
   async events(
     @Query('userId') userId?: string,
+    @Query('sessionId') sessionId?: string,
     @Query('eventType') eventType?: string,
     @Query('from') from?: string,
     @Query('limit') limit = '50',
   ) {
-    return { events: await this.audit.query({ userId, eventType, from, limit: Math.min(Number(limit) || 50, 200) }) }
+    return { events: await this.audit.query({ userId, sessionId, eventType, from, limit: Math.min(Number(limit) || 50, 200) }) }
   }
 }

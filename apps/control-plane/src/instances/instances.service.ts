@@ -14,12 +14,13 @@ export class InstancesService implements InstanceOrchestrator, OnModuleInit {
   private logger = new Logger('Instances')
   private impl!: InstanceOrchestrator
 
-  constructor(private readonly pg: PgStore) {}
-
-  onModuleInit() {
+  constructor(private readonly pg: PgStore) {
     const mode = loadConfig().orchestrator
     this.impl = mode === 'docker' ? new ContainerOrchestrator() : new MemoryOrchestrator()
-    this.logger.log(`orchestrator=${mode}`)
+  }
+
+  onModuleInit() {
+    this.logger.log(`orchestrator=${loadConfig().orchestrator}`)
     // 空闲回收巡检（生产由控制面定时任务驱动；这里演示用）
     setInterval(async () => {
       const reaped = await this.impl.reapIdle(Date.now())
@@ -90,5 +91,17 @@ export class InstancesService implements InstanceOrchestrator, OnModuleInit {
   async stop(id: string) {
     await this.impl.stop(id)
     await this.pg.markInstanceDead(id).catch(() => undefined)
+  }
+
+  /** 回收某用户全部未死亡实例（禁用用户时立即回收） */
+  async stopForUser(userId: string): Promise<string[]> {
+    const ids: string[] = []
+    for (const inst of await this.list()) {
+      if (inst.userId !== userId) continue
+      if (inst.status === 'dead' || inst.status === 'reaping') continue
+      await this.stop(inst.id)
+      ids.push(inst.id)
+    }
+    return ids
   }
 }

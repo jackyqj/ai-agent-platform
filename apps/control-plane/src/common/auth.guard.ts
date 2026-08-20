@@ -5,10 +5,11 @@ import {
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common'
-import { Reflector } from '@nestjs/core'
+import { ModuleRef, Reflector } from '@nestjs/core'
 import { JwtService } from '@nestjs/jwt'
 import { loadConfig } from '../config/config.js'
 import { ROLES_KEY } from './roles.decorator.js'
+import { UsersService } from '../users/users.service.js'
 
 export interface AuthUser {
   sub: string // 平台用户 id
@@ -24,6 +25,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -40,10 +42,25 @@ export class AuthGuard implements CanActivate {
     }
     req.user = payload
 
+    if (await this.isDisabled(payload.sub)) {
+      throw new UnauthorizedException('user disabled')
+    }
+
     const required = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [ctx.getHandler(), ctx.getClass()])
     if (required && required.length > 0 && !required.includes(payload.role)) {
       throw new ForbiddenException(`role ${payload.role} not in [${required.join(', ')}]`)
     }
     return true
+  }
+
+  private async isDisabled(userId: string): Promise<boolean> {
+    let users: UsersService | undefined
+    try {
+      users = this.moduleRef.get(UsersService, { strict: false })
+    } catch {
+      users = undefined
+    }
+    const u = users?.get(userId)
+    return u?.status === 'disabled'
   }
 }

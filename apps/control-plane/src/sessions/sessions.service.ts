@@ -16,6 +16,8 @@ export interface Session {
   lastActiveAt: string
 }
 
+export type AdminSessionView = Omit<Session, 'routingSecret'>
+
 /**
  * 会话路由（enterprise-shell §3.3）：用户 ↔ 会话 ↔ 实例映射 + routing_secret
  * 持久化（08）：PG sessions 表为主存储（跨实例/重启可恢复）；PG 不可用时回退内存。
@@ -79,6 +81,25 @@ export class SessionsService {
     return [...this.memory.values()].filter((s) => s.userId === userId && s.status !== 'closed')
   }
 
+  async listAdmin(f: { userId?: string; from?: string; to?: string; limit?: number }): Promise<AdminSessionView[]> {
+    const limit = Math.min(Math.max(f.limit ?? 100, 1), 200)
+    let rows: Session[]
+    if (await this.persist()) {
+      try {
+        rows = await this.pg.listSessionsAdmin({ ...f, limit })
+      } catch (e) {
+        console.error('[sessions] PG admin list failed, falling back:', (e as Error).message)
+        rows = [...this.memory.values()]
+      }
+    } else {
+      rows = [...this.memory.values()]
+    }
+    if (f.userId) rows = rows.filter((s) => s.userId === f.userId)
+    if (f.from) rows = rows.filter((s) => toIso(s.createdAt) >= f.from!)
+    if (f.to) rows = rows.filter((s) => toIso(s.createdAt) <= f.to!)
+    return rows.slice(0, limit).map(toAdminView)
+  }
+
   async get(id: string): Promise<Session | undefined> {
     if (await this.persist()) {
       try {
@@ -94,12 +115,30 @@ export class SessionsService {
   async close(id: string, userId: string): Promise<void> {
     const s = (await this.get(id)) ?? this.memory.get(id)
     if (!s || s.userId !== userId) return
+    s.status = 'closed'
+    s.lastActiveAt = new Date().toISOString()
     if (await this.persist()) {
       await this.pg.updateSessionStatus(id, 'closed')
     } else {
-      this.memory.delete(id)
+      this.memory.set(id, s)
     }
     if (s.instanceId) await this.instances.stop(s.instanceId)
     await this.audit.append({ userId, sessionId: id, eventType: 'session.close', payload: {} })
   }
+
+  async closeAllForUser(userId: string): Promise<void> {
+    const open = await this.listForUser(userId)
+    for (const s of open) {
+      await this.close(s.id, userId)
+    }
+  }
+}
+
+function toAdminView(s: Session): AdminSessionView {
+  const { routingSecret: _secret, ...rest } = s
+  return rest
+}
+
+function toIso(value: string | Date): string {
+  return typeof value === 'string' ? value : value.toISOString()
 }

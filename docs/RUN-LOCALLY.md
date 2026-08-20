@@ -87,7 +87,8 @@ Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`�
 ```sh
 cd web/store
 python3 -m http.server 8080 --bind 127.0.0.1
-# 浏览器打开 http://127.0.0.1:8080/index.html（或直接 file:// 打开该文件，CORS 已放行）
+# 商店：http://127.0.0.1:8080/index.html
+# 管理后台：http://127.0.0.1:8080/admin.html（u-admin 登录；CORS 已放行）
 ```
 
 ## 5. 演示流程
@@ -121,6 +122,12 @@ curl -X POST http://127.0.0.1:4000/api/service/trigger \
 curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 # done 的任务 result.finalResponse 是模型最终回答；审计链在 audit_events 表
 ```
+
+### E. 管理后台 v1（10 工单）
+- 打开 http://127.0.0.1:8080/admin.html，用 `u-admin` 登录
+- **3 步找会话**：用户表点「会话」→ 会话表点一行 → 下方事件摘要
+- 禁用 `u-hr-1`：其实例立即回收；该用户再调 API 返回 401 `user disabled`
+- 模型配置为只读（03 网关未部署）；审计区可按 userId / sessionId / eventType 过滤
 
 ## 6. 常用配置（env）
 

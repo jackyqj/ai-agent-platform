@@ -28,13 +28,17 @@ export class PgStore {
     return res.rows[0]
   }
 
-  async queryAudit(f: { userId?: string; eventType?: string; from?: string; limit: number }): Promise<AuditRow[]> {
+  async queryAudit(f: { userId?: string; sessionId?: string; eventType?: string; from?: string; limit: number }): Promise<AuditRow[]> {
     const p = this.pool!
     const where: string[] = []
     const args: unknown[] = []
     if (f.userId) {
       args.push(f.userId)
       where.push(`user_id = $${args.length}`)
+    }
+    if (f.sessionId) {
+      args.push(f.sessionId)
+      where.push(`session_id = $${args.length}`)
     }
     if (f.eventType) {
       args.push(f.eventType)
@@ -90,6 +94,33 @@ export class PgStore {
               created_at AS "createdAt", last_active_at AS "lastActiveAt"
        FROM sessions WHERE user_id = $1 AND status <> 'closed' ORDER BY created_at DESC`,
       [userId],
+    )
+    return res.rows
+  }
+
+  async listSessionsAdmin(f: { userId?: string; from?: string; to?: string; limit: number }) {
+    const where: string[] = []
+    const args: unknown[] = []
+    if (f.userId) {
+      args.push(f.userId)
+      where.push(`user_id = $${args.length}`)
+    }
+    if (f.from) {
+      args.push(f.from)
+      where.push(`created_at >= $${args.length}`)
+    }
+    if (f.to) {
+      args.push(f.to)
+      where.push(`created_at <= $${args.length}`)
+    }
+    args.push(f.limit)
+    const res = await this.pool!.query(
+      `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", type,
+              instance_id AS "instanceId", routing_secret AS "routingSecret", status,
+              created_at AS "createdAt", last_active_at AS "lastActiveAt"
+       FROM sessions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY created_at DESC LIMIT $${args.length}`,
+      args,
     )
     return res.rows
   }

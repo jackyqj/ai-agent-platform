@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公司 AI Agent 平台 · 管理后台</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0f1115; color: #e6e8eb; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: #8a919c; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #171a21; border: 1px solid #262b36; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input, select { background: #0f1115; border: 1px solid #2c3340; color: #e6e8eb; border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  input { min-width: 140px; }
+  button { background: #2f6fed; color: #fff; border: 0; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid #3a4458; color: #c3c9d4; }
+  button.danger { background: #b3423f; } button.ok { background: #2e8b57; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232833; }
+  th { color: #8a919c; }
+  tr.clickable { cursor: pointer; } tr.clickable:hover { background: #1d222c; }
+  tr.selected { background: #1a2740; }
+  .msg { font-size: 12px; color: #6db3f2; margin-top: 8px; white-space: pre-wrap; }
+  .err { color: #e07a78; }
+  section { margin-bottom: 22px; }
+  section h2 { font-size: 15px; color: #c3c9d4; border-bottom: 1px solid #262b36; padding-bottom: 6px; }
+  .hidden { display: none; }
+  .badge { padding: 2px 8px; border-radius: 20px; font-size: 11px; }
+  .b-private { background: #3a2d12; color: #e0b64c; } .b-cloud { background: #14324d; color: #6db3f2; }
+  .b-ok { background: #1d3a2a; color: #6dca8f; } .b-off { background: #3a1d1d; color: #e07a78; }
+  a { color: #6db3f2; }
+</style>
+</head>
+<body>
+<h1>公司 AI Agent 平台 · 管理后台 v1</h1>
+<div class="sub">
+  用户 / 实例 / 会话 / 模型 / 审计 —
+  控制面 <span id="apiHost">http://127.0.0.1:4000</span>
+  · <a href="index.html">返回商店</a>
+</div>
+
+<section class="card row">
+  <input id="userId" placeholder="管理员 id" value="u-admin">
+  <button onclick="login()">登录（dev）</button>
+  <span id="who"></span>
+</section>
+
+<section id="adminSection" class="hidden">
+  <section class="card">
+    <h2>1. 用户</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="userFilter" placeholder="筛姓名 / 部门 / id" oninput="renderUsers()">
+    </div>
+    <div id="users"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. 会话</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="sessUser" placeholder="userId">
+      <input id="sessDept" placeholder="部门（精确）">
+      <input id="sessFrom" type="datetime-local" title="起始时间">
+      <button onclick="loadSessions()">检索</button>
+      <button class="ghost" onclick="clearSessionFilter()">清空</button>
+    </div>
+    <div id="sessions"></div>
+  </section>
+
+  <section class="card">
+    <h2>3. 会话事件摘要</h2>
+    <div id="sessionDetail" class="msg">在会话表中点一行即可查看（管理员找会话：登录 → 点用户「会话」→ 点会话行）</div>
+  </section>
+
+  <section class="card">
+    <h2>实例</h2>
+    <div class="row" style="margin-bottom:8px">
+      <button class="ghost" onclick="loadInstances()">刷新</button>
+      <button class="danger" onclick="reapIdle()">回收空闲</button>
+    </div>
+    <div id="instances"></div>
+  </section>
+
+  <section class="card">
+    <h2>模型配置（只读；网关见工单 03）</h2>
+    <div id="models"></div>
+  </section>
+
+  <section class="card">
+    <h2>审计查询</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input id="auditUser" placeholder="userId">
+      <input id="auditSession" placeholder="sessionId">
+      <input id="auditType" placeholder="eventType（如 admin.user.disable）">
+      <button onclick="loadAudit()">查询</button>
+    </div>
+    <div id="audit"></div>
+  </section>
+</section>
+
+<div class="msg" id="msg"></div>
+
+<script>
+const API = document.getElementById('apiHost').textContent
+let token = localStorage.getItem('cp_token') || ''
+let role = ''
+let usersCache = []
+let selectedSessionId = ''
+
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  if (token) headers['Authorization'] = 'Bearer ' + token
+  const res = await fetch(API + path, { ...opts, headers })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || res.status)
+  return res.json()
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
+}
+
+function msg(t, err) {
+  const el = document.getElementById('msg')
+  el.textContent = t
+  el.className = 'msg' + (err ? ' err' : '')
+}
+
+async function login() {
+  try {
+    const id = document.getElementById('userId').value
+    const r = await api('/api/auth/dev/login?userId=' + encodeURIComponent(id))
+    token = r.accessToken
+    localStorage.setItem('cp_token', token)
+    const me = await api('/api/me')
+    role = me.role
+    document.getElementById('who').textContent = `已登录：${me.name}（${me.role} / ${me.dept}）`
+    if (role !== 'admin') {
+      document.getElementById('adminSection').classList.add('hidden')
+      msg('需要 admin 角色', true)
+      return
+    }
+    document.getElementById('adminSection').classList.remove('hidden')
+    await loadAll()
+    msg('')
+  } catch (e) { msg('登录失败：' + e.message, true) }
+}
+
+async function loadAll() {
+  await Promise.all([loadUsers(), loadSessions(), loadInstances(), loadModels(), loadAudit()])
+}
+
+async function loadUsers() {
+  const r = await api('/api/admin/users')
+  usersCache = r.users
+  renderUsers()
+}
+
+function renderUsers() {
+  const q = (document.getElementById('userFilter').value || '').toLowerCase()
+  const rows = usersCache.filter((u) =>
+    !q || u.id.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || u.dept.toLowerCase().includes(q)
+  )
+  document.getElementById('users').innerHTML = rows.length === 0 ? '<div class="msg">无用户</div>' :
+    '<table><tr><th>id</th><th>姓名</th><th>部门</th><th>角色</th><th>状态</th><th></th></tr>' +
+    rows.map((u) => `<tr>
+      <td>${esc(u.id)}</td><td>${esc(u.name)}</td>
+      <td><input data-dept="${esc(u.id)}" value="${esc(u.dept)}" style="min-width:100px"></td>
+      <td><select data-role="${esc(u.id)}">
+        ${['employee','developer','admin'].map((r) => `<option${r===u.role?' selected':''}>${r}</option>`).join('')}
+      </select></td>
+      <td><span class="badge ${u.status==='active'?'b-ok':'b-off'}">${esc(u.status)}</span></td>
+      <td>
+        <button class="ghost" onclick="focusUser('${esc(u.id)}')">会话</button>
+        <button class="ghost" onclick="saveUser('${esc(u.id)}')">保存</button>
+        <button class="${u.status==='active'?'danger':'ok'}" onclick="setStatus('${esc(u.id)}','${u.status==='active'?'disabled':'active'}')">
+          ${u.status==='active'?'禁用':'启用'}
+        </button>
+      </td>
+    </tr>`).join('') + '</table>'
+}
+
+function focusUser(id) {
+  document.getElementById('sessUser').value = id
+  document.getElementById('sessDept').value = ''
+  document.getElementById('auditUser').value = id
+  loadSessions()
+}
+
+async function saveUser(id) {
+  try {
+    const dept = document.querySelector(`[data-dept="${id}"]`).value
+    const roleVal = document.querySelector(`[data-role="${id}"]`).value
+    await api('/api/admin/users/' + id, { method: 'POST', body: JSON.stringify({ dept, role: roleVal }) })
+    await Promise.all([loadUsers(), loadAudit()])
+    msg('已保存 ' + id)
+  } catch (e) { msg('保存失败：' + e.message, true) }
+}
+
+async function setStatus(id, status) {
+  try {
+    await api('/api/admin/users/' + id, { method: 'POST', body: JSON.stringify({ status }) })
+    await loadAll()
+    msg(status === 'disabled' ? '已禁用并回收实例：' + id : '已启用：' + id)
+  } catch (e) { msg('状态更新失败：' + e.message, true) }
+}
+
+function localToIso(v) {
+  if (!v) return ''
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString()
+}
+
+async function loadSessions() {
+  const userId = document.getElementById('sessUser').value.trim()
+  const dept = document.getElementById('sessDept').value.trim()
+  const from = localToIso(document.getElementById('sessFrom').value)
+  const qs = new URLSearchParams()
+  if (userId) qs.set('userId', userId)
+  if (dept) qs.set('dept', dept)
+  if (from) qs.set('from', from)
+  const r = await api('/api/admin/sessions' + (qs.toString() ? '?' + qs : ''))
+  document.getElementById('sessions').innerHTML = r.sessions.length === 0 ? '<div class="msg">无会话</div>' :
+    '<table><tr><th>会话</th><th>用户</th><th>部门</th><th>Agent</th><th>状态</th><th>创建</th></tr>' +
+    r.sessions.map((s) => `<tr class="clickable ${s.id===selectedSessionId?'selected':''}" onclick="openSession('${esc(s.id)}')">
+      <td>${esc(s.id.slice(0,8))}…</td>
+      <td>${esc(s.userName || s.userId)}</td>
+      <td>${esc(s.dept || '')}</td>
+      <td>${esc(s.agentPresetId)}</td>
+      <td>${esc(s.status)}</td>
+      <td>${esc(String(s.createdAt).replace('T',' ').slice(0,19))}</td>
+    </tr>`).join('') + '</table>'
+}
+
+function clearSessionFilter() {
+  document.getElementById('sessUser').value = ''
+  document.getElementById('sessDept').value = ''
+  document.getElementById('sessFrom').value = ''
+  selectedSessionId = ''
+  loadSessions()
+}
+
+async function openSession(id) {
+  selectedSessionId = id
+  document.getElementById('auditSession').value = id
+  try {
+    const r = await api('/api/admin/sessions/' + id)
+    const ev = (r.events || []).map((e) => `${esc(e.ts)}  ${esc(e.eventType)}  ${esc(JSON.stringify(e.payload||{}))}`).join('\n')
+    document.getElementById('sessionDetail').innerHTML =
+      `<div>会话 ${esc(r.session.id)} · ${esc(r.session.userId)} · ${esc(r.session.agentPresetId)} · ${esc(r.session.status)}</div>` +
+      `<div class="msg">${ev || '无事件'}</div>`
+    await loadSessions()
+  } catch (e) { msg('读取会话失败：' + e.message, true) }
+}
+
+async function loadInstances() {
+  const r = await api('/api/admin/instances')
+  document.getElementById('instances').innerHTML =
+    `<div class="msg" style="margin:0 0 8px">live ${r.count} / 列表 ${r.instances.length}</div>` +
+    (r.instances.length === 0 ? '<div class="msg">无实例</div>' :
+    '<table><tr><th>id</th><th>用户</th><th>地址</th><th>状态</th><th>心跳</th><th></th></tr>' +
+    r.instances.map((i) => `<tr>
+      <td>${esc(i.id.slice(0,8))}…</td><td>${esc(i.userId||'')}</td>
+      <td>${esc(i.host)}:${esc(i.port)}</td><td>${esc(i.status)}</td>
+      <td>${esc(String(i.lastHeartbeat||'').replace('T',' ').slice(0,19))}</td>
+      <td>${i.status==='dead'?'':`<button class="danger" onclick="stopInstance('${esc(i.id)}')">回收</button>`}</td>
+    </tr>`).join('') + '</table>')
+}
+
+async function stopInstance(id) {
+  try {
+    await api('/api/admin/instances/' + id + '/stop', { method: 'POST', body: '{}' })
+    await Promise.all([loadInstances(), loadAudit()])
+    msg('已回收实例')
+  } catch (e) { msg('回收失败：' + e.message, true) }
+}
+
+async function reapIdle() {
+  try {
+    const r = await api('/api/admin/instances/reap', { method: 'POST', body: '{}' })
+    await Promise.all([loadInstances(), loadAudit()])
+    msg('回收空闲：' + ((r.reaped || []).join(',') || '无'))
+  } catch (e) { msg('回收失败：' + e.message, true) }
+}
+
+async function loadModels() {
+  const r = await api('/api/admin/models')
+  document.getElementById('models').innerHTML =
+    `<div class="row" style="margin-bottom:8px">
+      <span class="badge b-cloud">默认 ${esc(r.defaultModel)}</span>
+      <span class="badge ${r.gateway.deployed?'b-ok':'b-off'}">网关 ${r.gateway.deployed?'已部署':'未部署'}</span>
+      <span class="badge b-cloud">云端 ${esc(r.gateway.cloudBaseUrl||'—')}</span>
+      <span class="badge b-private">私有 ${esc(r.gateway.privateBaseUrl||'—')} ${esc(r.gateway.privateModel||'')}</span>
+    </div>` +
+    '<table><tr><th>Agent</th><th>模型</th><th>提供方</th><th>路由</th></tr>' +
+    r.agents.map((a) => `<tr>
+      <td>${esc(a.name)}</td><td>${esc(a.model)}</td><td>${esc(a.provider)}</td>
+      <td><span class="badge ${a.route==='private'?'b-private':'b-cloud'}">${esc(a.route)}</span></td>
+    </tr>`).join('') + '</table>'
+}
+
+async function loadAudit() {
+  const qs = new URLSearchParams()
+  const userId = document.getElementById('auditUser').value.trim()
+  const sessionId = document.getElementById('auditSession').value.trim()
+  const eventType = document.getElementById('auditType').value.trim()
+  if (userId) qs.set('userId', userId)
+  if (sessionId) qs.set('sessionId', sessionId)
+  if (eventType) qs.set('eventType', eventType)
+  qs.set('limit', '50')
+  const r = await api('/api/admin/audit/events?' + qs)
+  document.getElementById('audit').innerHTML = r.events.length === 0 ? '<div class="msg">无事件</div>' :
+    '<table><tr><th>时间</th><th>用户</th><th>会话</th><th>类型</th><th>payload</th></tr>' +
+    r.events.map((e) => `<tr>
+      <td>${esc(String(e.ts).replace('T',' ').slice(0,19))}</td>
+      <td>${esc(e.userId||'')}</td>
+      <td>${esc((e.sessionId||'').slice(0,8))}</td>
+      <td>${esc(e.eventType)}</td>
+      <td>${esc(JSON.stringify(e.payload||{}))}</td>
+    </tr>`).join('') + '</table>'
+}
+
+if (token) login()
+</script>
+</body>
+</html>

@@ -34,7 +34,7 @@
 </head>
 <body>
 <h1>公司 AI Agent 平台 · 试点商店</h1>
-<div class="sub">本地演示版（dev 认证）— 控制面 API：<span id="apiHost">http://127.0.0.1:4000</span></div>
+<div class="sub">本地演示版（dev 认证）— 控制面 API：<span id="apiHost">http://127.0.0.1:4000</span> · <a href="admin.html" style="color:#6db3f2">管理后台</a></div>
 
 <section class="card row">
   <input id="userId" placeholder="用户 id（u-admin / u-dev-1 / u-hr-1）" value="u-admin">
@@ -108,7 +108,8 @@ async function login() {
     localStorage.setItem('cp_token', token)
     const me = await api('/api/me')
     role = me.role
-    document.getElementById('who').textContent = `已登录：${me.name}（${me.role} / ${me.dept}）`
+    document.getElementById('who').innerHTML = `已登录：${me.name}（${me.role} / ${me.dept}）` +
+      (me.role === 'admin' ? ' · <a href="admin.html" style="color:#6db3f2">打开管理后台</a>' : '')
     document.getElementById('adminSection').classList.toggle('hidden', role !== 'admin')
     await Promise.all([loadStore(), loadAdmin()])
   } catch (e) { msg('登录失败：' + e.message) }

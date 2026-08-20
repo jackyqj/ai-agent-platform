@@ -1,7 +1,8 @@
 // 审批 API（14 工单）：待审批列表/决定/我的审批
 import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { ApprovalService } from './approval.service.js'
 import { TasksService } from '../tasks/tasks.service.js'
 
@@ -21,16 +22,16 @@ export class ApprovalsController {
 
   /** 待审批列表（admin/manager） */
   @Get('admin/approvals/pending')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('approval.decide')
   async pending() {
     return { approvals: await this.approvals.listPending() }
   }
 
   /** 决定：approve | reject（通过后任务入队） */
   @Post('admin/approvals/:id/decide')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('approval.decide')
   async decide(@Req() req: { user: { sub: string } }, @Param('id') id: string, @Body() body: { approve: boolean }) {
     try {
       const a = await this.approvals.decide(id, body.approve === true, req.user.sub, (taskId) => this.tasks.enqueue(taskId))

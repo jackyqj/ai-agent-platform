@@ -1,25 +1,30 @@
 import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { InstancesService } from '../instances/instances.service.js'
 import { SessionsService } from '../sessions/sessions.service.js'
 import { UsersService, type User } from './users.service.js'
+import { PermissionPolicyService } from '../common/permission-policy.service.js'
 
 @Controller('admin/users')
-@UseGuards(AuthGuard)
-@Roles('admin')
+@UseGuards(AuthGuard, PermissionGuard)
+@RequirePermission('user.manage')
 export class UsersController {
   constructor(
     private readonly users: UsersService,
     private readonly sessions: SessionsService,
     private readonly instances: InstancesService,
     private readonly audit: AuditStore,
+    private readonly policies: PermissionPolicyService,
   ) {}
 
   @Get()
   list() {
-    return { users: this.users.list() }
+    return {
+      users: this.users.list().map((u) => ({ ...u, permissionMode: this.policies.resolve(u.role, u.dept) })),
+    }
   }
 
   @Post(':id')
@@ -33,7 +38,9 @@ export class UsersController {
     const role = parseRole(body.role)
     const status = parseStatus(body.status)
     const user = this.users.patch(id, { status, role, dept: body.dept })
-    if (status === 'disabled') {
+    const roleOrDeptChanged =
+      (role !== undefined && role !== before.role) || (body.dept !== undefined && body.dept !== before.dept)
+    if (status === 'disabled' || roleOrDeptChanged) {
       await this.sessions.closeAllForUser(id)
       await this.instances.stopForUser(id)
     }
@@ -42,13 +49,15 @@ export class UsersController {
         ? 'admin.user.disable'
         : status === 'active' && before.status === 'disabled'
           ? 'admin.user.enable'
-          : 'admin.user.patch'
+          : role !== undefined && role !== before.role
+            ? 'admin.permission.change'
+            : 'admin.user.patch'
     await this.audit.append({
       userId: req.user.sub,
       eventType,
       payload: { targetUserId: id, status, role, dept: body.dept },
     })
-    return { user }
+    return { user: user ? { ...user, permissionMode: this.policies.resolve(user.role, user.dept) } : user }
   }
 }
 

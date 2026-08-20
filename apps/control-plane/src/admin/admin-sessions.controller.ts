@@ -1,13 +1,14 @@
 import { Controller, Get, Param, Query, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { SessionsService } from '../sessions/sessions.service.js'
 import { UsersService } from '../users/users.service.js'
 
 @Controller('admin/sessions')
-@UseGuards(AuthGuard)
-@Roles('admin')
+@UseGuards(AuthGuard, PermissionGuard)
+@RequirePermission('user.manage')
 export class AdminSessionsController {
   constructor(
     private readonly sessions: SessionsService,

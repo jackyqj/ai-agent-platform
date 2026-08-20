@@ -1,9 +1,11 @@
 // 任务 API（19 工单）：服务身份触发 + 用户查询 + 管理面
 import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { ApiKeyGuard, ScopeGuard, type ServiceRequest } from '../keys/api-key.guard.js'
 import { TasksService } from './tasks.service.js'
+import { can, type Role } from '../common/permissions.js'
 
 @Controller()
 export class TasksController {
@@ -49,7 +51,7 @@ export class TasksController {
   async cancel(@Req() req: { user: { sub: string; role: string } }, @Param('id') id: string) {
     const t = await this.tasks.get(id)
     if (!t) throw new HttpException('task not found', HttpStatus.NOT_FOUND)
-    if (t.userId !== req.user.sub && req.user.role !== 'admin') {
+    if (t.userId !== req.user.sub && !can(req.user.role as Role, 'task.view_all')) {
       throw new HttpException('forbidden', HttpStatus.FORBIDDEN)
     }
     try {
@@ -62,8 +64,8 @@ export class TasksController {
 
   /** 管理面：全部任务 */
   @Get('admin/tasks')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('task.view_all')
   async all() {
     return { tasks: await this.tasks.listAll() }
   }

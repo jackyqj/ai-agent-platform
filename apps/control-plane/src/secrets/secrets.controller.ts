@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Put, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { SecretsService } from './secrets.service.js'
 
@@ -12,22 +13,22 @@ export class SecretsController {
   ) {}
 
   @Get('admin/secrets')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('secrets.manage')
   async list() {
     return { secrets: await this.secrets.list() }
   }
 
   @Get('admin/secrets/:ref')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('secrets.manage')
   async describe(@Param('ref') ref: string) {
     return this.secrets.describe(ref)
   }
 
   @Put('admin/secrets/:ref')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('secrets.manage')
   async set(
     @Req() req: { user: { sub: string } },
     @Param('ref') ref: string,
@@ -44,8 +45,8 @@ export class SecretsController {
   }
 
   @Delete('admin/secrets/:ref')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('secrets.manage')
   async unset(@Req() req: { user: { sub: string } }, @Param('ref') ref: string) {
     await this.secrets.unset(ref)
     await this.audit.append({ userId: req.user.sub, eventType: 'secrets.unset', payload: { ref } })

@@ -81,6 +81,21 @@
   </section>
 
   <section class="card">
+    <h2>权限（13：角色 → DSH 沙箱，部门覆盖优先）</h2>
+    <div id="rbac"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="ovDept" placeholder="部门名（如 业务部）">
+      <select id="ovPreset">
+        <option value="read-only">read-only</option>
+        <option value="workspace-write" selected>workspace-write</option>
+        <option value="danger-full-access">danger-full-access</option>
+      </select>
+      <button onclick="saveOverlay()">设置部门覆盖</button>
+      <button class="ghost" onclick="clearOverlay()">清除覆盖</button>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>模型配置（只读；网关见工单 03）</h2>
     <div id="models"></div>
   </section>
@@ -145,7 +160,7 @@ async function login() {
 }
 
 async function loadAll() {
-  await Promise.all([loadUsers(), loadSessions(), loadInstances(), loadModels(), loadAudit()])
+  await Promise.all([loadUsers(), loadSessions(), loadInstances(), loadModels(), loadAudit(), loadRbac()])
 }
 
 async function loadUsers() {
@@ -160,13 +175,14 @@ function renderUsers() {
     !q || u.id.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || u.dept.toLowerCase().includes(q)
   )
   document.getElementById('users').innerHTML = rows.length === 0 ? '<div class="msg">无用户</div>' :
-    '<table><tr><th>id</th><th>姓名</th><th>部门</th><th>角色</th><th>状态</th><th></th></tr>' +
+    '<table><tr><th>id</th><th>姓名</th><th>部门</th><th>角色</th><th>沙箱</th><th>状态</th><th></th></tr>' +
     rows.map((u) => `<tr>
       <td>${esc(u.id)}</td><td>${esc(u.name)}</td>
       <td><input data-dept="${esc(u.id)}" value="${esc(u.dept)}" style="min-width:100px"></td>
       <td><select data-role="${esc(u.id)}">
         ${['employee','developer','admin'].map((r) => `<option${r===u.role?' selected':''}>${r}</option>`).join('')}
       </select></td>
+      <td><span class="badge ${u.permissionMode==='danger-full-access'?'b-off':u.permissionMode==='read-only'?'b-cloud':'b-ok'}">${esc(u.permissionMode||'')}</span></td>
       <td><span class="badge ${u.status==='active'?'b-ok':'b-off'}">${esc(u.status)}</span></td>
       <td>
         <button class="ghost" onclick="focusUser('${esc(u.id)}')">会话</button>
@@ -279,6 +295,36 @@ async function reapIdle() {
     await Promise.all([loadInstances(), loadAudit()])
     msg('回收空闲：' + ((r.reaped || []).join(',') || '无'))
   } catch (e) { msg('回收失败：' + e.message, true) }
+}
+
+async function loadRbac() {
+  const r = await api('/api/admin/permissions')
+  const overlays = Object.entries(r.deptOverlays || {})
+  document.getElementById('rbac').innerHTML =
+    '<div class="msg" style="margin:0 0 8px">角色默认：员工 workspace-write；开发者/管理员 danger-full-access。新会话生效，改角色会回收旧实例。</div>' +
+    '<table><tr><th>部门覆盖</th><th>preset</th></tr>' +
+    (overlays.length === 0 ? '<tr><td colspan="2">无覆盖（继承角色）</td></tr>' :
+      overlays.map(([d, p]) => `<tr><td>${esc(d)}</td><td>${esc(p)}</td></tr>`).join('')) +
+    '</table>'
+}
+
+async function saveOverlay() {
+  try {
+    const dept = document.getElementById('ovDept').value.trim()
+    const preset = document.getElementById('ovPreset').value
+    await api('/api/admin/permissions/overlays', { method: 'PUT', body: JSON.stringify({ dept, preset }) })
+    await Promise.all([loadRbac(), loadUsers(), loadAudit()])
+    msg('已设置部门覆盖：' + dept)
+  } catch (e) { msg('设置失败：' + e.message, true) }
+}
+
+async function clearOverlay() {
+  try {
+    const dept = document.getElementById('ovDept').value.trim()
+    await api('/api/admin/permissions/overlays', { method: 'PUT', body: JSON.stringify({ dept, preset: null }) })
+    await Promise.all([loadRbac(), loadUsers(), loadAudit()])
+    msg('已清除部门覆盖：' + dept)
+  } catch (e) { msg('清除失败：' + e.message, true) }
 }
 
 async function loadModels() {

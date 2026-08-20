@@ -36,7 +36,7 @@ export class SessionsService {
     return this.pg.pool !== null
   }
 
-  async create(userId: string, agentPresetId = 'assistant'): Promise<Session> {
+  async create(userId: string, agentPresetId = 'assistant', permissionMode = 'workspace-write'): Promise<Session> {
     // 懒启动实例（02 profile 镜像的注入参数；生产 env 来自密钥服务/配置中心）
     const instance = await this.instances.getOrCreateWebInstance({
       userId,
@@ -48,6 +48,7 @@ export class SessionsService {
         PG_DSN: process.env.DATABASE_URL ?? process.env.PG_DSN ?? '',
         SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
         CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
+        DSH_PERMISSION_MODE: permissionMode,
       },
     })
     const session: Session = {
@@ -66,7 +67,7 @@ export class SessionsService {
     } else {
       this.memory.set(session.id, session)
     }
-    await this.audit.append({ userId, sessionId: session.id, eventType: 'session.create', payload: { agentPresetId } })
+    await this.audit.append({ userId, sessionId: session.id, eventType: 'session.create', payload: { agentPresetId, permissionMode } })
     return session
   }
 

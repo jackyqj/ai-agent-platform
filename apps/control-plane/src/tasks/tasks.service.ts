@@ -7,12 +7,14 @@ import { PgStore } from '../store/pg.store.js'
 import { AuditStore } from '../common/audit.store.js'
 import { ApprovalService } from '../approvals/approval.service.js'
 import { QuotaService } from '../quota/quota.service.js'
+import { UsersService } from '../users/users.service.js'
+import { PermissionPolicyService } from '../common/permission-policy.service.js'
 
 export interface TaskRecord {
   id: string
   userId: string
   agentPresetId: string
-  payload: { task: string }
+  payload: { task: string; permissionMode?: string }
   status: 'queued' | 'running' | 'done' | 'failed'
   result?: { finalResponse: string; finishReason?: string | null }
   error?: string
@@ -32,6 +34,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     private readonly audit: AuditStore,
     private readonly approvals: ApprovalService,
     private readonly quota: QuotaService,
+    private readonly users: UsersService,
+    private readonly policies: PermissionPolicyService,
   ) {}
 
   private redisUrl(): string {
@@ -53,11 +57,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
   /** 提交任务：PG 落库（queued）→ 审批门（preset approvalLevel）→ 通过则入队，否则等待审批 */
   async submit(userId: string, agentPresetId: string, taskText: string): Promise<TaskRecord & { awaitingApproval?: boolean }> {
+    const user = this.users.get(userId)
+    const permissionMode = this.policies.resolve(user?.role ?? 'employee', user?.dept ?? '')
     const record: TaskRecord = {
       id: randomUUID(),
       userId,
       agentPresetId,
-      payload: { task: taskText },
+      payload: { task: taskText, permissionMode },
       status: 'queued',
       createdAt: new Date().toISOString(),
     }

@@ -18,6 +18,7 @@
 | 19 任务队列 | BullMQ + Worker（TS SDK 驱动运行时）+ 可靠性五件套 | 触发→执行→done；重试 3/3/超时/取消/串行/孤儿全验 | 步骤级轨迹（用户已决定不补）、IM/回调 |
 | 09 集中凭据 | PG AES-256-GCM vault + admin API + bootstrap + `dsh-credentials-pg` 按请求 resolve | 单测：vault 优先/轮换/describe 无明文；worker + 公司 profile 已挂载 | 交互容器 HTTP resolve（不持主密钥）；resolve 热路径审计 |
 | 10 管理后台 v1 | 静态管理页 + 用户启用/禁用（立即回收实例、JWT 拒绝）+ 管理员会话检索/事件摘要 + 实例回收 + 只读模型配置 + 审计查询 | 单测：disable/patch、admin list 无 routing_secret、closeAll 回收实例、sessionId 审计过滤 | 网关未部署故模型配置只读；未做 React 门户 |
+| 13 RBAC | 权限点全量应用到管理端点 + 拒绝审计；角色→DSH_PERMISSION_MODE；部门 overlay | 单测：preset 解析/部门覆盖、employee 拒 user.manage 并留痕 | 自定义角色与 users 落 PG；开发者审计按需放开 |
 
 ## 🟡 部分完成（部署包/材料就绪，待资源或真人）
 
@@ -31,7 +32,6 @@
 | 工单 | 阶段 | 前置 |
 |---|---|---|
 | 11 试点扩量 | Phase 1 | 05 试点结果 |
-| 13 RBAC | ✅ 权限矩阵集中化（11 权限点 + PermissionGuard），employee 越权实测 403 | 权限点全量应用；部门级覆盖（等 07） |
 | 15 审计看板 | ✅ 用量聚合 API + 看板 UI（任务/失败/Agent/配额/错误） | token 成本口径 + OTel 全链路（等 03 网关/日志平台） |
 | 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 | token/成本记账（等 03 网关）；warn 告警通道 |
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |

@@ -58,8 +58,8 @@ async function q<T>(text: string, args: unknown[] = []): Promise<{ rows: T[] }> 
   return pool.query(text, args)
 }
 
-async function getTask(taskId: string): Promise<{ id: string; userId: string; status: string; payload: { task?: string } } | undefined> {
-  const { rows } = await q<{ id: string; userId: string; status: string; payload: { task?: string } }>(
+async function getTask(taskId: string): Promise<{ id: string; userId: string; status: string; payload: { task?: string; permissionMode?: string } } | undefined> {
+  const { rows } = await q<{ id: string; userId: string; status: string; payload: { task?: string; permissionMode?: string } }>(
     `SELECT id, user_id AS "userId", status, payload FROM tasks WHERE id = $1`,
     [taskId],
   )
@@ -87,7 +87,7 @@ async function audit(userId: string, eventType: string, payload: unknown) {
 }
 
 /** 运行中取消：轮询任务状态，被 kill 则关闭 harness（杀掉运行时子进程）→ run 中止 */
-async function runWithCancel(job: Job, taskId: string, taskText: string, attempt: number): Promise<void> {
+async function runWithCancel(job: Job, taskId: string, taskText: string, attempt: number, permissionMode: string): Promise<void> {
   let harness: DeepSeekHarness | undefined
   const stopPolling = { active: true }
   const poller = setInterval(async () => {
@@ -115,6 +115,7 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
           EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
           // Fallback only: credentials-pg prefers vault, so a rotation still wins.
           DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
+          DSH_PERMISSION_MODE: permissionMode,
         },
       },
       provider: 'deepseek-official',
@@ -169,7 +170,7 @@ async function execute(job: Job<{ taskId: string }>): Promise<void> {
   } else {
     await patchTask(taskId, { status: 'running' })
   }
-  await runWithCancel(job, taskId, task.payload?.task ?? '', attempt)
+  await runWithCancel(job, taskId, task.payload?.task ?? '', attempt, task.payload?.permissionMode ?? 'workspace-write')
 }
 
 // ── 同用户串行：同一 userId 的任务链式执行，不同用户可并行 ────────────────

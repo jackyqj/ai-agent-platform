@@ -2,6 +2,7 @@
 import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { ScheduledTasksService } from './scheduled-tasks.service.js'
 
 @Controller()
@@ -62,7 +63,8 @@ export class ScheduledTasksController {
 
   /** 管理面：全部定时任务 */
   @Get('admin/scheduled-tasks')
-  @UseGuards(AuthGuard, new PermissionGuard('task.view_all'))
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('task.view_all')
   async all() {
     return { tasks: await this.sched.list() }
   }

@@ -39,3 +39,44 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
 export function can(role: Role, permission: Permission): boolean {
   return (PERMISSIONS[permission] ?? []).includes(role)
 }
+
+/** DSH `dsh-permission-presets` 表名（与 sandbox/mode 对齐，经 DSH_PERMISSION_MODE 注入） */
+export type DshPresetName = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export const ROLE_DSH_PRESET: Record<Role, DshPresetName> = {
+  employee: 'workspace-write',
+  developer: 'danger-full-access',
+  admin: 'danger-full-access',
+}
+
+export function isDshPresetName(value: string): value is DshPresetName {
+  return value === 'read-only' || value === 'workspace-write' || value === 'danger-full-access'
+}
+
+export function isRole(value: string): value is Role {
+  return value === 'employee' || value === 'developer' || value === 'admin'
+}
+
+/** `CP_DEPT_PERMISSION`：部门名:preset 逗号分隔，覆盖角色默认 */
+export function parseDeptOverlays(raw: string | undefined): Record<string, DshPresetName> {
+  const out: Record<string, DshPresetName> = {}
+  for (const pair of (raw ?? '').split(',')) {
+    const idx = pair.lastIndexOf(':')
+    if (idx <= 0) continue
+    const dept = pair.slice(0, idx).trim()
+    const preset = pair.slice(idx + 1).trim()
+    if (dept && isDshPresetName(preset)) out[dept] = preset
+  }
+  return out
+}
+
+/**
+ * 部门覆盖优先，否则按角色默认。未知角色按员工收敛（workspace-write + ask）。
+ * 存量会话不改：调用方只在新会话/新任务上 pin。
+ */
+export function resolveDshPreset(role: string, dept: string, overlays: Record<string, DshPresetName> = {}): DshPresetName {
+  const overlay = overlays[dept]
+  if (overlay) return overlay
+  if (isRole(role)) return ROLE_DSH_PRESET[role]
+  return 'workspace-write'
+}

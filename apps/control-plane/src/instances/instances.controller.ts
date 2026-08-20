@@ -1,12 +1,13 @@
 import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { InstancesService } from './instances.service.js'
 
 @Controller('admin/instances')
-@UseGuards(AuthGuard)
-@Roles('admin')
+@UseGuards(AuthGuard, PermissionGuard)
+@RequirePermission('instance.manage')
 export class InstancesController {
   constructor(
     private readonly instances: InstancesService,

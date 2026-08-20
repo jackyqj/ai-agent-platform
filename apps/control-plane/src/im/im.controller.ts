@@ -2,12 +2,14 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { ImService } from './im.service.js'
 import { DingtalkStreamService } from './dingtalk-stream.service.js'
 import { loadConfig } from '../config/config.js'
 
 @Controller('admin/im')
-@UseGuards(AuthGuard, new PermissionGuard('audit.view'))
+@UseGuards(AuthGuard, PermissionGuard)
+@RequirePermission('audit.view')
 export class ImController {
   constructor(
     private readonly im: ImService,

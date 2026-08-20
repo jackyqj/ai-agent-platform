@@ -1,20 +1,25 @@
 import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
+import { PermissionPolicyService } from '../common/permission-policy.service.js'
 import { SessionsService } from './sessions.service.js'
 
 @Controller('sessions')
 @UseGuards(AuthGuard)
 export class SessionsController {
-  constructor(private readonly sessions: SessionsService) {}
+  constructor(
+    private readonly sessions: SessionsService,
+    private readonly policies: PermissionPolicyService,
+  ) {}
 
   /** 创建/恢复会话（返回 routing token 供代理使用，shell §7） */
   @Post()
   async create(
-    @Req() req: { user: { sub: string } },
+    @Req() req: { user: { sub: string; role: string; dept: string } },
     @Body() body: { agentPresetId?: string },
   ) {
-    const s = await this.sessions.create(req.user.sub, body.agentPresetId)
-    return { sessionId: s.id, routingSecret: s.routingSecret, agentPresetId: s.agentPresetId }
+    const permissionMode = this.policies.resolve(req.user.role, req.user.dept)
+    const s = await this.sessions.create(req.user.sub, body.agentPresetId, permissionMode)
+    return { sessionId: s.id, routingSecret: s.routingSecret, agentPresetId: s.agentPresetId, permissionMode }
   }
 
   @Get()

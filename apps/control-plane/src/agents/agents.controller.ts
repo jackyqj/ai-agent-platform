@@ -1,7 +1,8 @@
 // Agent 商店 API（12 工单）：员工可见列表/详情 + 管理上架/下架/可见性
 import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AgentsService } from './agents.service.js'
 
 @Controller()
@@ -30,16 +31,16 @@ export class AgentsController {
 
   /** 管理面：全部（含草稿/下架） */
   @Get('admin/agents')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
   async all() {
     return { agents: await this.agents.list() }
   }
 
   /** 上架（发布到商店） */
   @Post('admin/agents/:id/publish')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
   async publish(@Param('id') id: string) {
     const a = await this.agents.publish(id)
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
@@ -48,8 +49,8 @@ export class AgentsController {
 
   /** 下架（新会话不可选，存量不受影响） */
   @Post('admin/agents/:id/unpublish')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
   async unpublish(@Param('id') id: string) {
     const a = await this.agents.unpublish(id)
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
@@ -58,8 +59,8 @@ export class AgentsController {
 
   /** 可见性：{roles:[], departments:[]} */
   @Post('admin/agents/:id/visibility')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
   async visibility(@Param('id') id: string, @Body() body: { roles?: string[]; departments?: string[] }) {
     const a = await this.agents.setVisibility(id, { roles: body.roles, departments: body.departments })
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
@@ -70,7 +71,8 @@ export class AgentsController {
 
   /** 提审新 Agent（员工；基于模板，复制即作者写入口） */
   @Post('agents/propose')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.propose')
   async propose(
     @Req() req: { user: { sub: string } },
     @Body() body: { id: string; name: string; description: string; basedOn?: string },
@@ -88,8 +90,8 @@ export class AgentsController {
 
   /** admin 批准：生成 preset 文件并上架 */
   @Post('admin/agents/:id/approve')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.approve')
   async approve(@Param('id') id: string) {
     try {
       const a = await this.agents.approve(id)
@@ -102,8 +104,8 @@ export class AgentsController {
 
   /** admin 拒绝 */
   @Post('admin/agents/:id/reject')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.approve')
   async reject(@Param('id') id: string) {
     const a = await this.agents.reject(id)
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)

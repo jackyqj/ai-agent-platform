@@ -40,11 +40,15 @@ export class AuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException('invalid or expired token')
     }
-    req.user = payload
 
-    if (await this.isDisabled(payload.sub)) {
+    const live = this.liveUser(payload.sub)
+    if (live?.status === 'disabled') {
       throw new UnauthorizedException('user disabled')
     }
+    if (live) {
+      payload = { sub: live.id, role: live.role, dept: live.dept }
+    }
+    req.user = payload
 
     const required = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [ctx.getHandler(), ctx.getClass()])
     if (required && required.length > 0 && !required.includes(payload.role)) {
@@ -53,14 +57,11 @@ export class AuthGuard implements CanActivate {
     return true
   }
 
-  private async isDisabled(userId: string): Promise<boolean> {
-    let users: UsersService | undefined
+  private liveUser(userId: string) {
     try {
-      users = this.moduleRef.get(UsersService, { strict: false })
+      return this.moduleRef.get(UsersService, { strict: false }).get(userId)
     } catch {
-      users = undefined
+      return undefined
     }
-    const u = users?.get(userId)
-    return u?.status === 'disabled'
   }
 }

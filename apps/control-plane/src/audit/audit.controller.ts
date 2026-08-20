@@ -1,11 +1,12 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
-import { Roles } from '../common/roles.decorator.js'
+import { PermissionGuard } from '../common/permission.guard.js'
+import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 
 @Controller('admin/audit')
-@UseGuards(AuthGuard)
-@Roles('admin')
+@UseGuards(AuthGuard, PermissionGuard)
+@RequirePermission('audit.view')
 export class AuditController {
   constructor(private readonly audit: AuditStore) {}
 

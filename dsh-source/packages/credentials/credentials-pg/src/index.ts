@@ -3,6 +3,9 @@
  * Vault wins over the process environment so an admin rotation reaches the next
  * `resolve` without restarting the runtime. Values are never cached.
  *
+ * Two backends: direct PG decrypt (trusted worker) or HTTP resolve against the
+ * control plane (interactive containers that must not hold the master key).
+ *
  * Platform-owned provider for the 09 工单. NOT an upstream contribution: repo
  * gates (doc-sync, bilingual README) are owned separately.
  *
@@ -24,10 +27,18 @@ const REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 export interface Config {
   /** PostgreSQL connection string, or the literal `memory:` for in-process tests. */
-  url: string
+  url?: string
   /** Vault master secret (`SECRETS_MASTER_KEY`, local fallback `CP_JWT_SECRET`). */
-  masterKey: string
+  masterKey?: string
+  /** Control-plane resolve base URL; when set, the process never sees the master key. */
+  resolveUrl?: string
+  /** `X-API-Key` for HTTP resolve (`secrets:resolve` scope). */
+  token?: string
 }
+
+export type ResolvedSpec =
+  | { mode: 'http'; resolveUrl: string; token: string }
+  | { mode: 'pg'; url: string; masterKey: string }
 
 interface StoredRow {
   nonce: Buffer
@@ -43,13 +54,19 @@ export interface SecretQuery {
 }
 
 /**
- * Plugin config: a non-empty url and master key. Defaulting happens in
- * {@link resolveSpec}, never inline.
+ * Plugin config: HTTP resolveUrl+token, or a postgres url and master key.
+ * Defaulting happens here, never inline.
  */
-export function resolveSpec(config: Config): Config {
+export function resolveSpec(config: Config): ResolvedSpec {
+  const resolveUrl = (config.resolveUrl ?? '').replace(/\/$/, '')
+  const token = config.token ?? ''
+  if (resolveUrl) {
+    if (!token) throw new Error('credentials-pg: token is required when resolveUrl is set')
+    return { mode: 'http', resolveUrl, token }
+  }
   if (!config.url) throw new Error('credentials-pg: url is required (postgres URL, or memory: for tests)')
   if (!config.masterKey) throw new Error('credentials-pg: master key is empty')
-  return { url: config.url, masterKey: config.masterKey }
+  return { mode: 'pg', url: config.url, masterKey: config.masterKey }
 }
 
 function assertRef(ref: string): CredentialRef {
@@ -84,11 +101,13 @@ export async function lookupSecret(
 /** PostgreSQL (or in-memory) credentials provider. */
 export class PgCredentialProvider extends CredentialProvider {
   static Config: z<Config> = z.object({
-    url: z.string().required(),
-    masterKey: z.string().required(),
+    url: z.string().default(''),
+    masterKey: z.string().default(''),
+    resolveUrl: z.string().default(''),
+    token: z.string().default(''),
   })
 
-  private readonly spec: Config
+  private readonly spec: ResolvedSpec
   private readonly memory = new Map<string, StoredRow>()
   private pool: pg.Pool | undefined
   private closed = false
@@ -98,12 +117,20 @@ export class PgCredentialProvider extends CredentialProvider {
     this.spec = resolveSpec(config)
   }
 
+  private isHttp(): boolean {
+    return this.spec.mode === 'http'
+  }
+
   private isMemory(): boolean {
-    return this.spec.url === MEMORY_URL
+    return this.spec.mode === 'pg' && this.spec.url === MEMORY_URL
   }
 
   private isClosed(): boolean {
     return this.closed
+  }
+
+  private writable(): boolean {
+    return !this.isHttp()
   }
 
   private ambient(ref: CredentialRef): string | undefined {
@@ -123,7 +150,7 @@ export class PgCredentialProvider extends CredentialProvider {
       /* v8 ignore stop */
     }
     /* v8 ignore start -- postgres pool construction is covered by DATABASE_URL integration */
-    if (!this.isMemory()) {
+    if (this.spec.mode === 'pg' && this.spec.url !== MEMORY_URL) {
       this.pool = new pg.Pool({ connectionString: this.spec.url })
     }
     /* v8 ignore stop */
@@ -131,7 +158,7 @@ export class PgCredentialProvider extends CredentialProvider {
 
   override async resolve(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
     const stored = await this.readVault(ref)
-    if (stored !== undefined) return { value: stored, source: 'vault' }
+    if (stored !== undefined) return stored
     const ambient = this.ambient(ref)
     if (ambient !== undefined) return { value: ambient, source: 'env' }
     return undefined
@@ -139,11 +166,12 @@ export class PgCredentialProvider extends CredentialProvider {
 
   override async describe(ref: CredentialRef): Promise<CredentialInfo> {
     const hit = await this.resolve(ref)
-    if (!hit) return { configured: false, writable: true }
-    return { configured: true, source: hit.source, writable: true }
+    if (!hit) return { configured: false, writable: this.writable() }
+    return { configured: true, source: hit.source, writable: this.writable() }
   }
 
   override async set(ref: CredentialRef, value: string): Promise<void> {
+    this.assertWritable('set', ref)
     if (value.length === 0) {
       throw new Error(`credentials-pg: an empty value cannot be stored for "${ref}"; use unset`)
     }
@@ -153,9 +181,16 @@ export class PgCredentialProvider extends CredentialProvider {
   }
 
   override async unset(ref: CredentialRef): Promise<void> {
+    this.assertWritable('unset', ref)
     this.assertOpen('unset', ref)
     const existed = await this.deleteVault(ref)
     if (existed) this.notifyUpdated(ref)
+  }
+
+  private assertWritable(verb: 'set' | 'unset', ref: CredentialRef): void {
+    if (this.isHttp()) {
+      throw new Error(`credentials-pg: HTTP resolve is read-only; cannot ${verb} "${ref}"`)
+    }
   }
 
   private assertOpen(verb: 'set' | 'unset', ref: CredentialRef): void {
@@ -164,7 +199,27 @@ export class PgCredentialProvider extends CredentialProvider {
     }
   }
 
-  private async readVault(ref: CredentialRef): Promise<string | undefined> {
+  private async readVault(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
+    if (this.spec.mode === 'http') return this.readHttp(ref)
+    const value = await this.readPg(ref)
+    return value !== undefined ? { value, source: 'vault' } : undefined
+  }
+
+  private async readHttp(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
+    if (this.spec.mode !== 'http') return undefined
+    const res = await fetch(`${this.spec.resolveUrl}/${encodeURIComponent(ref)}`, {
+      headers: { 'x-api-key': this.spec.token },
+    })
+    if (res.status === 404) return undefined
+    if (!res.ok) throw new Error(`credentials-pg: HTTP resolve "${ref}" failed: ${res.status}`)
+    const body = (await res.json()) as { value?: unknown; source?: unknown }
+    if (typeof body.value !== 'string' || body.value.length === 0) return undefined
+    const source = typeof body.source === 'string' && body.source.length > 0 ? body.source : 'vault'
+    return { value: body.value, source }
+  }
+
+  private async readPg(ref: CredentialRef): Promise<string | undefined> {
+    if (this.spec.mode !== 'pg') return undefined
     /* v8 ignore start -- postgres read is covered by DATABASE_URL integration */
     if (!this.isMemory()) {
       if (this.pool === undefined) return undefined
@@ -176,6 +231,9 @@ export class PgCredentialProvider extends CredentialProvider {
   }
 
   private async writeVault(ref: CredentialRef, value: string): Promise<void> {
+    if (this.spec.mode !== 'pg') {
+      throw new Error(`credentials-pg: HTTP resolve is read-only; cannot set "${ref}"`)
+    }
     const stored = encrypt(this.spec.masterKey, value)
     /* v8 ignore start -- postgres write is covered by DATABASE_URL integration */
     if (!this.isMemory()) {
@@ -197,6 +255,9 @@ export class PgCredentialProvider extends CredentialProvider {
   }
 
   private async deleteVault(ref: CredentialRef): Promise<boolean> {
+    if (this.spec.mode !== 'pg') {
+      throw new Error(`credentials-pg: HTTP resolve is read-only; cannot unset "${ref}"`)
+    }
     /* v8 ignore start -- postgres delete is covered by DATABASE_URL integration */
     if (!this.isMemory()) {
       if (this.pool === undefined) {

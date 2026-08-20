@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { AuditStore } from '../common/audit.store.js'
+import { PgStore } from '../store/pg.store.js'
 import { CredentialVault } from './vault.js'
 import { SecretsService } from './secrets.service.js'
 
@@ -38,4 +40,36 @@ test('describe never includes the secret value', async () => {
   const info = await secrets.describe('CP_OIDC_CLIENT_SECRET')
   assert.deepEqual(info, { configured: true, source: 'vault', writable: true })
   assert.ok(!JSON.stringify(info).includes('super-secret'))
+})
+
+test('resolve audits ref and source without the plaintext', async () => {
+  const vault = new CredentialVault(null, 'master')
+  const audit = new AuditStore(new PgStore(undefined))
+  const secrets = new SecretsService(vault, {}, audit)
+  await secrets.set('DEEPSEEK_API_KEY', 'sk-live', 'u-admin')
+  await secrets.resolve('DEEPSEEK_API_KEY', { via: 'http', actorId: 'k-instance' })
+  const events = await audit.query({ eventType: 'secrets.resolve', limit: 10 })
+  assert.equal(events.length, 1)
+  assert.deepEqual(events[0]?.payload, { ref: 'DEEPSEEK_API_KEY', source: 'vault', configured: true, via: 'http' })
+  assert.equal(events[0]?.userId, 'k-instance')
+  assert.ok(!JSON.stringify(events[0]).includes('sk-live'))
+})
+
+test('describe does not write a resolve audit event', async () => {
+  const vault = new CredentialVault(null, 'master')
+  const audit = new AuditStore(new PgStore(undefined))
+  const secrets = new SecretsService(vault, {}, audit)
+  await secrets.set('DEEPSEEK_API_KEY', 'sk-live', 'u-admin')
+  await secrets.describe('DEEPSEEK_API_KEY')
+  assert.equal((await audit.query({ eventType: 'secrets.resolve', limit: 10 })).length, 0)
+})
+
+test('unconfigured resolve is still audited', async () => {
+  const vault = new CredentialVault(null, 'master')
+  const audit = new AuditStore(new PgStore(undefined))
+  const secrets = new SecretsService(vault, {}, audit)
+  assert.equal(await secrets.resolve('MISSING_KEY', { via: 'http' }), undefined)
+  const events = await audit.query({ eventType: 'secrets.resolve', limit: 10 })
+  assert.equal(events.length, 1)
+  assert.deepEqual(events[0]?.payload, { ref: 'MISSING_KEY', source: null, configured: false, via: 'http' })
 })

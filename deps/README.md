@@ -8,7 +8,7 @@
 |---|---|---|
 | 任务 Worker | `dsh-source/packages/platform/task-worker/` | 平台自有（D21）：BullMQ 消费端 + TS SDK 驱动 DSH 运行时；依赖 `workspace:^` 的 `@deepseek-ai/dsh-*` 包，须在 workspace 上下文解析 |
 | PG 会话持久化 Provider | `dsh-source/packages/session/session-persistence-pg/` | 平台自有（D21）：PG SessionPersistence；依赖 workspace 包 + 共享测试契约（`session-persistence/tests/contract.ts`），测试须在工作区跑 |
-| PG 凭据 Provider | `dsh-source/packages/credentials/credentials-pg/` | 平台自有（D20）：`ctx.credentials` 读 `credential_secrets`，按请求 resolve |
+| PG 凭据 Provider | `dsh-source/packages/credentials/credentials-pg/` | 平台自有（D20）：`ctx.credentials` 读 vault 或 HTTP resolve，按请求解析 |
 
 两组件曾尝试迁出 + 符号链接，pnpm/vitest 按真实路径解析导致 `bullmq` 找不到、`tsconfig not found`。
 **vendor 整树是唯一可靠方式**：单仓库 clone 即跑、版本随平台 commit 固化、协作/CI 只拉一个仓库。

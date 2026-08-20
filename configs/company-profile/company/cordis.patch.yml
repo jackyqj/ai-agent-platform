@@ -34,13 +34,16 @@
             trust: system
         includeUserRoot: false                 # 员工自建 preset 走提审，不直接开放
 
-# ── 集中凭据（09 / D20：PG vault 替代本地 .credentials.yaml）────────────────
+# ── 集中凭据（09 / D20：PG vault；交互容器走 HTTP resolve，不持主密钥）────
 # 按请求 resolve；vault 优先于 env，admin 轮换无需重启实例。
+# CP_SECRETS_URL 非空 → HTTP（容器）；否则直连 PG（worker / 本机 CLI）。
 - id: credentials
   name: '@deepseek-ai/dsh-credentials-pg'
   config:
     url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
     masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
+    resolveUrl: !!js process.env.CP_SECRETS_URL ?? ''
+    token: !!js process.env.CP_SECRETS_TOKEN ?? ''
 
 # ── 共享会话存储（08 工单：PG 持久化替代 JSONL）────────────────────────────
 # 会话事件落 PostgreSQL（dsh_sessions schema），跨实例/跨设备可恢复。

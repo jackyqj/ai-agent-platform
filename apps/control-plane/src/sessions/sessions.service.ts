@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { AuditStore } from '../common/audit.store.js'
 import { PgStore } from '../store/pg.store.js'
 import { InstancesService } from '../instances/instances.service.js'
+import { webInstanceEnv } from './web-instance-env.js'
 
 export interface Session {
   id: string
@@ -40,16 +41,7 @@ export class SessionsService {
     // 懒启动实例（02 profile 镜像的注入参数；生产 env 来自密钥服务/配置中心）
     const instance = await this.instances.getOrCreateWebInstance({
       userId,
-      env: {
-        DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL ?? '',
-        CP_TRUSTED_HOST: '127.0.0.1',
-        DSH_HOME: '/dsh-home', // 容器内 DSH_HOME（08 工单后为共享卷）
-        DATABASE_URL: process.env.DATABASE_URL ?? process.env.PG_DSN ?? '',
-        PG_DSN: process.env.DATABASE_URL ?? process.env.PG_DSN ?? '',
-        SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
-        CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
-        DSH_PERMISSION_MODE: permissionMode,
-      },
+      env: webInstanceEnv(permissionMode),
     })
     const session: Session = {
       id: randomUUID(),

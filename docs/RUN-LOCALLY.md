@@ -129,6 +129,12 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 - 禁用 `u-hr-1`：其实例立即回收；该用户再调 API 返回 401 `user disabled`
 - 模型配置为只读（03 网关未部署）；审计区可按 userId / sessionId / eventType 过滤
 
+### F. 集中凭据 HTTP resolve（09 工单）
+- 交互 Web 实例**不持** `SECRETS_MASTER_KEY` / `CP_JWT_SECRET`；按请求 `GET /api/internal/secrets/:ref`（`X-API-Key` + scope `secrets:resolve`）
+- Worker 仍直连 PG vault（可信进程持主密钥）
+- 审计：`eventType=secrets.resolve`，payload 只有 `ref` / `source` / `configured`（无明文）
+- podman 容器把 `CP_SECRETS_URL` 设成宿主机可达地址（如 `http://host.containers.internal:4000/api/internal/secrets`）
+
 ## 6. 常用配置（env）
 
 | 变量 | 默认 | 说明 |
@@ -144,6 +150,9 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 | `CP_WORKER_CONCURRENCY` | 2 | worker 并发（同用户串行不受影响） |
 | `CP_PRESET_ROOT` | `$DSH_HOME/presets-company` | 商店 preset 文件根 |
 | `CP_GRANT_HOURS` | 24 | 授权存储「记住 X 小时」 |
+| `SECRETS_MASTER_KEY` | （回退 JWT） | vault 主密钥；**只给控制面与 worker**，不进交互容器 |
+| `CP_SECRETS_TOKEN` | dev: `cp_dev_secrets_resolve` | 实例 HTTP resolve 的 API key（scope `secrets:resolve`） |
+| `CP_SECRETS_URL` | `http://127.0.0.1:$CP_PORT/api/internal/secrets` | 容器内 resolve 基址；docker/podman 需改成宿主机可达 URL |
 
 ## 7. 停止与清理
 

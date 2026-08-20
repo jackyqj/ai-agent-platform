@@ -11,7 +11,7 @@
 |---|---|
 | `packages/platform/task-worker/` | 平台任务 Worker（BullMQ 消费 + 可靠性五件套 + workflow/subagent 装配） |
 | `packages/session/session-persistence-pg/` | PG SessionPersistence Provider（71/71 测试，100% 覆盖率） |
-| `packages/credentials/credentials-pg/` | PG 凭据 Provider（D20：vault 优先、按请求 resolve） |
+| `packages/credentials/credentials-pg/` | PG 凭据 Provider（D20：vault 优先、按请求 resolve；交互容器 HTTP 模式） |
 | `tsconfig.host.json` | 增加 pg / credentials-pg 包引用 |
 | `pnpm-workspace.yaml` | `allowBuilds.msgpackr-extract: false` |
 | `tsdown.config.ts` | workspace glob 排除 `packages/platform/*`（Worker 走 tsx，不进 tsdown） |

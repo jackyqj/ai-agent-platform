@@ -49,6 +49,42 @@ export class ApiKeysService {
     return { id, name, apiKey, scopes }
   }
 
+  /**
+   * Register a known plaintext token (instance HTTP resolve). Idempotent on hash.
+   * Plaintext is never stored; callers already hold it (env / bootstrap).
+   */
+  async ensureWithPlaintext(
+    name: string,
+    scopes: string[],
+    plaintext: string,
+    byUserId: string,
+  ): Promise<{ created: boolean }> {
+    if (!plaintext) throw new Error('plaintext required')
+    const keyHash = this.hash(plaintext)
+    if (await this.persist()) {
+      const existing = await this.pg.getApiKeyByHash(keyHash)
+      if (existing) return { created: false }
+      const id = randomUUID()
+      await this.pg.insertApiKey({ id, name, keyHash, scopes })
+      await this.audit.append({
+        userId: byUserId,
+        eventType: 'admin.apikey.create',
+        payload: { keyId: id, name, scopes, bootstrap: true },
+      })
+      return { created: true }
+    }
+    const existing = [...this.memory.values()].find((k) => k.keyHash === keyHash)
+    if (existing) return { created: false }
+    const id = randomUUID()
+    this.memory.set(id, { id, name, scopes, status: 'active', keyHash })
+    await this.audit.append({
+      userId: byUserId,
+      eventType: 'admin.apikey.create',
+      payload: { keyId: id, name, scopes, bootstrap: true },
+    })
+    return { created: true }
+  }
+
   async list(): Promise<ApiKeyRecord[]> {
     if (await this.persist()) {
       try {

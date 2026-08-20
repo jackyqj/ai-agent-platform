@@ -1,3 +1,4 @@
+import type { AuditStore } from '../common/audit.store.js'
 import type { SecretMeta } from './vault.js'
 import { CredentialVault } from './vault.js'
 
@@ -18,6 +19,11 @@ export interface SecretInfo {
   writable: boolean
 }
 
+export interface ResolveAudit {
+  via?: string
+  actorId?: string
+}
+
 export function masterKeyOf(env: NodeJS.ProcessEnv): string {
   const master = env.SECRETS_MASTER_KEY || env.CP_JWT_SECRET || ''
   if (!master) throw new Error('credential vault: set SECRETS_MASTER_KEY (or CP_JWT_SECRET as local fallback)')
@@ -32,9 +38,10 @@ export class SecretsService {
   constructor(
     private readonly vault: CredentialVault,
     private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly audit?: AuditStore,
   ) {}
 
-  async resolve(ref: string): Promise<{ value: string; source: SecretSource } | undefined> {
+  private async lookup(ref: string): Promise<{ value: string; source: SecretSource } | undefined> {
     const stored = await this.vault.get(ref)
     if (stored) return { value: stored, source: 'vault' }
     const ambient = this.env[ref]
@@ -42,8 +49,20 @@ export class SecretsService {
     return undefined
   }
 
+  async resolve(ref: string, ctx?: ResolveAudit): Promise<{ value: string; source: SecretSource } | undefined> {
+    const hit = await this.lookup(ref)
+    if (this.audit) {
+      await this.audit.append({
+        userId: ctx?.actorId,
+        eventType: 'secrets.resolve',
+        payload: { ref, source: hit?.source ?? null, configured: Boolean(hit), via: ctx?.via ?? 'service' },
+      })
+    }
+    return hit
+  }
+
   async describe(ref: string): Promise<SecretInfo> {
-    const hit = await this.resolve(ref)
+    const hit = await this.lookup(ref)
     if (!hit) return { configured: false, writable: true }
     return { configured: true, source: hit.source, writable: true }
   }

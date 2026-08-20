@@ -16,7 +16,7 @@
 | 12 Agent 商店 | 4 个真实 preset + 目录服务（PG）+ 提审流程 + 静态 UI | dsh-agent-presets 发现全过；draft→批准→文件生成→上架 | 前端商店 UI 已出静态版（无构建）；配额档（16） |
 | 14 审批流 | 授权存储 + 任务前置审批门 | 触发→pending→批准→入队；授权存储命中 | 多级审批、DSH 原生 seam 深层挂钩 |
 | 19 任务队列 | BullMQ + Worker（TS SDK 驱动运行时）+ 可靠性五件套 | 触发→执行→done；重试 3/3/超时/取消/串行/孤儿全验 | 步骤级轨迹（用户已决定不补）、IM/回调 |
-| 09 集中凭据 | PG AES-256-GCM vault + admin API + bootstrap + `dsh-credentials-pg` 按请求 resolve | 单测：vault 优先/轮换/describe 无明文；worker + 公司 profile 已挂载 | 交互容器 HTTP resolve（不持主密钥）；resolve 热路径审计 |
+| 09 集中凭据 | PG AES-256-GCM vault + admin API + bootstrap + `dsh-credentials-pg`（PG 或 HTTP resolve）+ 每次 resolve 审计 | 单测：vault 优先/轮换/describe 无明文；HTTP 不持主密钥；resolve 审计无明文 | 容器 DNS（`host.containers.internal`）；worker 直连 PG 的 resolve 不经控制面；网关密钥等 03 |
 | 10 管理后台 v1 | 静态管理页 + 用户启用/禁用（立即回收实例、JWT 拒绝）+ 管理员会话检索/事件摘要 + 实例回收 + 只读模型配置 + 审计查询 | 单测：disable/patch、admin list 无 routing_secret、closeAll 回收实例、sessionId 审计过滤 | 网关未部署故模型配置只读；未做 React 门户 |
 | 13 RBAC | 权限点全量应用到管理端点 + 拒绝审计；角色→DSH_PERMISSION_MODE；部门 overlay | 单测：preset 解析/部门覆盖、employee 拒 user.manage 并留痕 | 自定义角色与 users 落 PG；开发者审计按需放开 |
 

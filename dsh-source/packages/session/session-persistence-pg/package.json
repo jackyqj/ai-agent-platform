@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-session-persistence-pg",
   "description": "PostgreSQL durable session persistence backend for the DeepSeek Harness (platform-owned, 08 工单)",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0-rc.8",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

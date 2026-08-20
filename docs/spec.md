@@ -303,5 +303,5 @@ JD 中「参与公司大模型应用平台的搭建与迭代（RAG 知识库问�
 - **企业外壳设计**：`.scratch/ai-agent-platform/enterprise-shell.md`（控制面：§3 模块、§4 数据模型、§5 选型、§7 接口契约、§8 开发顺序）
 - **集中评审**：`.scratch/ai-agent-platform/fog-review.md`（Fog 剩余问题的评审材料）
 - **调研报告**：`.scratch/ai-agent-platform/research-report.md`（131 行完整评估，全部结论附包名/路径/README 引文证据）
-- **DSH 源码克隆**：`dsh-source/`（105MB，depth 50，HEAD = 0.1.0-rc.5，2026-08-13 公开版；本机 npm 安装为 0.1.0-rc.6，更新一档）
+- **DSH 源码克隆**：`dsh-source/`（vendor 源码，HEAD = 0.1.0-rc.8 / `141eb6fe`，2026-08-21 对齐 tag `dsh-v0.1.0-rc.8`）
 - 文档基于对 DSH v0.1.0-rc.6（本地安装）与 rc.5（仓库 HEAD）的勘察编写；随 DSH 上游演进需定期复核。技术细节以 DSH README 与源码为准。

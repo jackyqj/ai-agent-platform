@@ -31,7 +31,7 @@ describe('vault crypto', () => {
 
   it('fails to decrypt a tampered ciphertext', () => {
     const { nonce, ciphertext } = encrypt(MASTER, 'sk-live-secret')
-    ciphertext[0] ^= 0xff
+    ciphertext[0] = ciphertext[0]! ^ 0xff
     expect(() => decrypt(MASTER, nonce, ciphertext)).toThrow()
   })
 

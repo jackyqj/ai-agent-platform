@@ -43,7 +43,7 @@ const fixture = async (): Promise<CoordinatorFixture> => {
     const next = (await pool!.query(
       `SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM dsh_sessions.events WHERE session_id = $1`,
       [id],
-    )).rows[0].n
+    )).rows[0]!.n
     await pool!.query(
       `INSERT INTO dsh_sessions.events (session_id, seq, type, time, data) VALUES ($1, $2, 'assistant/chunk', $3, '{broken json')`,
       [id, Number(next), Date.now()],

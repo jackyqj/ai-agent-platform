@@ -3,7 +3,7 @@
 // 同用户串行（per-user 链）、孤儿任务回收（启动+周期扫描）
 import { Worker, type Job } from 'bullmq'
 import pg from 'pg'
-import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
+import { DeepSeekHarness, type RunResult } from '@deepseek-ai/dsh-sdk-client'
 import { lookupSecret } from '@deepseek-ai/dsh-credentials-pg'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -66,6 +66,15 @@ async function getTask(taskId: string): Promise<{ id: string; userId: string; st
   return rows[0]
 }
 
+/** rc.8 RunResult no longer carries finishReason; take it from the last turn/end. */
+function finishReasonOf(result: RunResult): string | undefined {
+  for (let i = result.events.length - 1; i >= 0; i--) {
+    const event = result.events[i]
+    if (event?.type === 'turn/end') return event.data.reason.kind
+  }
+  return undefined
+}
+
 async function patchTask(id: string, p: { status?: string; result?: unknown; error?: string; started?: boolean; finished?: boolean }) {
   const sets: string[] = []
   const args: unknown[] = []
@@ -104,7 +113,9 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
       launch: {
         command: process.execPath,
         args: [runtime.bin, runtime.cordis],
+        // rc.8: a provided env object replaces the child environment entirely.
         env: {
+          ...process.env,
           DATABASE_URL,
           PG_DSN: DATABASE_URL,
           SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
@@ -138,9 +149,10 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
       await audit(t.userId, 'task.cancelled', { taskId, reason: 'cancelled-while-running' })
       return
     }
-    await patchTask(taskId, { status: 'done', result: { finalResponse: result.finalResponse ?? '', finishReason: result.finishReason }, finished: true })
+    const finishReason = finishReasonOf(result)
+    await patchTask(taskId, { status: 'done', result: { finalResponse: result.finalResponse, finishReason }, finished: true })
     await audit(t!.userId, 'task.completed', { taskId })
-    console.log(`[worker] task ${taskId} done (${result.finishReason})`)
+    console.log(`[worker] task ${taskId} done (${finishReason ?? 'unknown'})`)
   } finally {
     stopPolling.active = false
     clearInterval(poller)

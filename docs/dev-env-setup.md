@@ -1,13 +1,13 @@
 # DSH 开发环境搭建记录（Phase 0，01 工单）
 
-> 环境事实：macOS（Node v26.5.0 / pnpm 11.21 / npm 12），仓库 `dsh-source/`（rc.5，压缩单 commit 克隆）。
-> 本机 npm 全局安装为 rc.6；开发基线以 **源码树 `dsh-source/` 为准**（跟随上游，版本锁定策略见 map.md D7）。
+> 环境事实：macOS（Node v26.5.0 / pnpm 11.21 / npm 12），仓库 `dsh-source/`（rc.8，tag `dsh-v0.1.0-rc.8` / `141eb6fe`）。
+> 开发基线以 **源码树 `dsh-source/` 为准**（跟随上游，版本锁定策略见 map.md D7）。
 
 ## 关键环境事实
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 仓库 | `/Users/jac/sw_dir/ai-agent-platform/dsh-source/` | 105MB，depth 50，HEAD = 0.1.0-rc.5 |
+| 仓库 | `/Users/jac/sw_dir/ai-agent-platform/dsh-source/` | vendor 源码，HEAD = 0.1.0-rc.8 |
 | Node | v26.5.0 | 满足 `^22.19 \|\| >=24` |
 | pnpm | 11.21（仓库 pin 11.7） | 工作区解析正常 |
 | 构建 | `pnpm install` 41.5s + `pnpm run build` 成功 | 219 包 + Web 前端 dist |

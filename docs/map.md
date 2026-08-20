@@ -5,7 +5,7 @@
 - 目标：公司内部 AI Agent 使用平台，50–500 人，综合平台（员工助手 + 业务自动化）
 - 技术路线：基于 DeepSeek Harness（DSH）扩展，不 fork 内核，围绕能力缝做平台层
 - 关键文档：`spec.md`（架构与路线图）、`enterprise-shell.md`（外壳/控制面设计：§3 模块、§4 数据模型、§7 接口契约、§8 开发顺序）、`research-report.md`（DSH 企业适配调研，131 行含包级证据）
-- 版本现状：DSH `0.1.0-rc.5`（**仓库内 vendor 源码 `dsh-source/`**，2025-08-19 迁入；上游 https://github.com/deepseek-ai/deepseek-harness，指针见 `dsh-source/VENDOR.md`）/ `0.1.0-rc.6`（本机 npm 安装）；pre-release，README 明示破坏性变更
+- 版本现状：DSH `0.1.0-rc.8`（**仓库内 vendor 源码 `dsh-source/`**，2026-08-21 对齐 tag `dsh-v0.1.0-rc.8`；上游 https://github.com/deepseek-ai/deepseek-harness，指针见 `dsh-source/VENDOR.md`）；pre-release，README 明示破坏性变更
 - 时间线：3 个月以上，4 个阶段（Phase 0–3），14+ 周；先试点后推广
 - 团队：2–3 名 AI 工程师（JD 主体）+ 1–2 名平台工程师 + 1 名前端 + 架构师/产品各 1（可兼）
 

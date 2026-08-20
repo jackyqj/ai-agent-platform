@@ -4,9 +4,16 @@
 .dsh-home/m0-test.yml
 .dsh-home/pg-persist-test.yml
 .dsh-home/*.log
+dsh-source/packages/platform/task-worker/.sessions-worker/
 node_modules/
 *.tsbuildinfo
 .DS_Store
+
+# 密钥（D20：明文只作 bootstrap，正式值在 PG 加密表）
+.env
+**/.env
+!.env.example
+!**/.env.example
 
 # 构建产物
 **/dist/

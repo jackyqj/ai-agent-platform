@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt'
 import { loadConfig } from '../config/config.js'
 import { AuditStore } from '../common/audit.store.js'
 import { UsersService } from '../users/users.service.js'
+import { SecretsService } from '../secrets/secrets.service.js'
 import type { AuthUser } from '../common/auth.guard.js'
 
 export type AuthMode = 'dev' | 'oidc'
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly users: UsersService,
     private readonly audit: AuditStore,
+    private readonly secrets: SecretsService,
   ) {}
 
   issueToken(user: AuthUser): { accessToken: string; expiresIn: number } {
@@ -53,8 +55,9 @@ export class AuthService {
    * oidc 模式：构造钉钉授权 URL。
    * state 为 JWT 签名值（10 分钟），回调时校验防 CSRF。
    */
-  buildAuthUrl(): string {
-    const { clientId, clientSecret, redirectUri } = this.cfg.oidc
+  async buildAuthUrl(): Promise<string> {
+    const { clientId, redirectUri } = this.cfg.oidc
+    const clientSecret = (await this.secrets.resolve('CP_OIDC_CLIENT_SECRET'))?.value
     if (!clientId || !clientSecret) {
       throw new Error('oidc not configured (CP_OIDC_CLIENT_ID / CP_OIDC_CLIENT_SECRET)')
     }
@@ -101,7 +104,11 @@ export class AuthService {
   }
 
   private async exchangeCode(code: string): Promise<{ accessToken: string; refreshToken?: string; expireIn?: number }> {
-    const { clientId, clientSecret } = this.cfg.oidc
+    const { clientId } = this.cfg.oidc
+    const clientSecret = (await this.secrets.resolve('CP_OIDC_CLIENT_SECRET'))?.value
+    if (!clientId || !clientSecret) {
+      throw new Error('oidc not configured (CP_OIDC_CLIENT_ID / CP_OIDC_CLIENT_SECRET)')
+    }
     const res = await fetch(AuthService.TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

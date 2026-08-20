@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "test": "node --import tsx --test src/secrets/*.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

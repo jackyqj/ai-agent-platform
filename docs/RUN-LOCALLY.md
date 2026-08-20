@@ -13,7 +13,7 @@ node -v            # ^22.19 || >=24
 pnpm -v            # >=11.7
 podman info        # 容器运行时（需要能拉镜像/起容器）
 # NVIDIA key（模型调用用；不写进任何文件，运行时 env 传递）
-export NVIDIA_KEY='nvapi-...'
+export NVIDIA_KEY='nvapi-...'   # 仅旧 NVIDIA 路径；当前默认 DeepSeek 官方（DS_API_KEY）
 export PG_DSN='postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
 ```
 
@@ -26,7 +26,7 @@ PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可�
 # 迁移（幂等，可重复执行）——迁移脚本在控制面包内
 CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < apps/control-plane/migrations/001_init.sql
-... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql
+... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql
 # 样例数据（试点报表场景）
 podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < services/mcp-db/seed.sql   #（或按 mcp-db README 手建 demo_sales）
@@ -70,11 +70,14 @@ curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application
 
 ```sh
 cd dsh-source/packages/platform/task-worker   # dsh-source 为仓库内 vendor 源码
-export DSH_HOME="$REPO_ROOT/.dsh-home"        # 仓库内运行时目录（presets/profiles/sessions）
-export DATABASE_URL="$PG_DSN" DEEPSEEK_API_KEY="$NVIDIA_KEY"
-export DEEPSEEK_BASE_URL="https://integrate.api.nvidia.com/v1"
+export DSH_HOME="$REPO_ROOT/.dsh-home"
+export DATABASE_URL="$PG_DSN"
+# 模型密钥由 D20 vault 按请求解析（.env 的 DS_API_KEY 启动时写入 vault）：
+# worker 把 DATABASE_URL + SECRETS_MASTER_KEY 传给运行时，不再注入 DEEPSEEK_API_KEY
+export DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+export DSH_MODEL="${DS_API_MODEL:-deepseek-v4-flash}"
 ./node_modules/.bin/tsx src/worker.ts
-# → [worker] ready (redis=..., concurrency=2, attempts=3, model=deepseek-ai/deepseek-v4-flash-0731)
+# → [worker] ready (..., model=deepseek-v4-flash)
 ```
 
 Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`，内含知识库/数据库两个 MCP Server）。

@@ -42,6 +42,10 @@ export class SessionsService {
         DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL ?? '',
         CP_TRUSTED_HOST: '127.0.0.1',
         DSH_HOME: '/dsh-home', // 容器内 DSH_HOME（08 工单后为共享卷）
+        DATABASE_URL: process.env.DATABASE_URL ?? process.env.PG_DSN ?? '',
+        PG_DSN: process.env.DATABASE_URL ?? process.env.PG_DSN ?? '',
+        SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
+        CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
       },
     })
     const session: Session = {

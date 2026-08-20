@@ -4,10 +4,18 @@
 import { Worker, type Job } from 'bullmq'
 import pg from 'pg'
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
+import { lookupSecret } from '@deepseek-ai/dsh-credentials-pg'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+loadPlatformEnv()
+
 const REDIS_URL = process.env.CP_REDIS_URL ?? 'redis://127.0.0.1:6379'
-const DATABASE_URL = process.env.DATABASE_URL ?? ''
+const DATABASE_URL =
+  process.env.DATABASE_URL ??
+  process.env.PG_DSN ??
+  'postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
 const pool = new pg.Pool({ connectionString: DATABASE_URL })
 
 const cfg = {
@@ -21,8 +29,29 @@ const cfg = {
 const runtime = {
   bin: process.env.CP_RUNTIME_BIN ?? fileURLToPath(new URL('../../../examples/jsonrpc-demo/lib/bin.js', import.meta.url)),
   cordis: process.env.CP_RUNTIME_CORDIS ?? fileURLToPath(new URL('../worker.cordis.yml', import.meta.url)),
-  model: process.env.DSH_MODEL ?? 'deepseek-ai/deepseek-v4-flash-0731',
+  model: process.env.DS_API_MODEL ?? process.env.DSH_MODEL ?? 'deepseek-v4-flash',
   workspace: process.env.DSH_CWD ?? fileURLToPath(new URL('../workspace', import.meta.url)),
+  baseURL: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
+}
+
+/** Load control-plane .env (DS_API_KEY / CP_JWT_SECRET) without overriding a live shell. */
+function loadPlatformEnv(): void {
+  const envPath = join(dirname(fileURLToPath(import.meta.url)), '../../../../../apps/control-plane/.env')
+  if (existsSync(envPath)) process.loadEnvFile(envPath)
+}
+
+/** D20: vault first, then process env. Re-resolved per task for MCP child env. */
+async function resolveRef(ref: string): Promise<string> {
+  const master = process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || ''
+  if (master) {
+    try {
+      const value = await lookupSecret(pool, master, ref)
+      if (value) return value
+    } catch {
+      // table missing on a fresh DB — fall through to env
+    }
+  }
+  return process.env[ref] || ''
 }
 
 async function q<T>(text: string, args: unknown[] = []): Promise<{ rows: T[] }> {
@@ -76,10 +105,16 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
         command: process.execPath,
         args: [runtime.bin, runtime.cordis],
         env: {
-          DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? '',
-          DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL ?? '',
+          DATABASE_URL,
+          PG_DSN: DATABASE_URL,
+          SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
+          CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
+          DEEPSEEK_BASE_URL: runtime.baseURL,
           DSH_CWD: runtime.workspace,
           DSH_MODEL: runtime.model,
+          EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
+          // Fallback only: credentials-pg prefers vault, so a rotation still wins.
+          DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
         },
       },
       provider: 'deepseek-official',

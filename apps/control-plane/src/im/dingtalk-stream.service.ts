@@ -4,6 +4,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { DWClient, TOPIC_ROBOT, type DWClientDownStream, type RobotTextMessage } from 'dingtalk-stream'
 import { loadConfig } from '../config/config.js'
 import { ImService } from './im.service.js'
+import { SecretsService } from '../secrets/secrets.service.js'
 
 @Injectable()
 export class DingtalkStreamService implements OnModuleInit, OnModuleDestroy {
@@ -11,10 +12,16 @@ export class DingtalkStreamService implements OnModuleInit, OnModuleDestroy {
   private client?: DWClient
   private connecting = false
 
-  constructor(private readonly im: ImService) {}
+  constructor(
+    private readonly im: ImService,
+    private readonly secrets: SecretsService,
+  ) {}
 
-  onModuleInit() {
-    const { clientId, clientSecret } = loadConfig().dingtalk
+  async onModuleInit() {
+    const { clientId } = loadConfig().dingtalk
+    const clientSecret =
+      (await this.secrets.resolve('CP_DINGTALK_CLIENT_SECRET'))?.value ??
+      (await this.secrets.resolve('CP_OIDC_CLIENT_SECRET'))?.value
     if (!clientId || !clientSecret) {
       this.logger.warn('未配置钉钉凭证（CP_DINGTALK_CLIENT_ID/SECRET 或 CP_OIDC_*），IM 机器人未启动')
       return

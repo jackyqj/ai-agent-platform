@@ -5,14 +5,21 @@
 - id: sdk-jsonrpc-server
   name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
 
-# 模型：NVIDIA OpenAI 兼容端点（env 注入，测试用；生产走网关）
+# D20：每请求从 PG vault 解析 apiKeyEnv（不把模型密钥注入进程 env）
+- id: credentials-pg
+  name: '@deepseek-ai/dsh-credentials-pg'
+  config:
+    url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
+    masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
+
+# 模型：DeepSeek 官方端点（密钥由 credentials-pg resolve；模型名 DS_API_MODEL / DSH_MODEL）
 - id: llm-deepseek
   name: '@deepseek-ai/dsh-llm-deepseek'
   config:
     apiKeyEnv: DEEPSEEK_API_KEY
     streamIdleTimeoutMs: 172800000
     models:
-      - id: !!js process.env.DSH_MODEL ?? 'deepseek-ai/deepseek-v4-flash-0731'
+      - id: !!js process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'deepseek-v4-flash'
         contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
 
 # 沙箱：任务工作区（只读知识库检索场景，保守用 workspace 写限）

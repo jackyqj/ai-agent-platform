@@ -1,3 +1,4 @@
+import './config/load-env.js'
 import 'reflect-metadata'
 import { NestFactory } from '@nestjs/core'
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify'
@@ -10,7 +11,7 @@ async function bootstrap() {
   // 静态商店 UI（file:// 或本地静态服务器）跨域访问控制面 API
   app.enableCors({
     origin: true,
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'x-api-key', 'x-routing-secret'],
   })
   // 业务 API 挂 /api；实例代理挂 /proxy（shell §7 契约）

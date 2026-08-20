@@ -34,6 +34,13 @@
             trust: system
         includeUserRoot: false                 # 员工自建 preset 走提审，不直接开放
 
+# ── 集中凭据（09 / D20：PG vault 替代本地 .credentials.yaml）────────────────
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-pg'
+  config:
+    url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
+    masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
+
 # ── 内部 MCP Server（04 工单的接入位，一个 Server 一行）────────────────────
 # - id: mcp-kb
 #   name: '@deepseek-ai/dsh-mcp-client'

@@ -13,6 +13,7 @@ export type Permission =
   | 'task.cancel'        // 取消任务（admin 可取消他人）
   | 'instance.manage'    // 实例管理
   | 'user.manage'        // 用户管理
+  | 'secrets.manage'     // D20 密钥读写（永不返回明文列表）
 
 export const ROLE_ORDER = ['employee', 'developer', 'admin'] as const
 export type Role = (typeof ROLE_ORDER)[number]
@@ -32,6 +33,7 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'task.view_all': ['admin'],
   'instance.manage': ['admin'],
   'user.manage': ['admin'],
+  'secrets.manage': ['admin'],
 }
 
 export function can(role: Role, permission: Permission): boolean {

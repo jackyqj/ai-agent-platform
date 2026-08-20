@@ -15,16 +15,21 @@ spec §2.2：`dsh-credentials` 是引用式凭据缝（配置只存 `apiKeyEnv` 
 
 ## 交付物
 
-- [ ] 凭据 Provider 实现（对接公司 KMS/secret 服务，接入方式见 Fog）
-- [ ] 配置迁移：模型网关密钥、MCP Server 鉴权、内部 API 凭据全部引用化
-- [ ] 轮换流程：换密钥不重启实例、不碰配置文件
-- [ ] 权限审计：谁能引用哪个凭据、何时解析
-- [ ] 本地回退策略（开发环境无 KMS 时）
+- [x] PG 加密 vault（AES-256-GCM）+ 控制面 `SecretsService`（resolve/describe/set/unset，不缓存）
+- [x] 启动 bootstrap：`.env` 的 `DS_API_KEY` → `DEEPSEEK_API_KEY`、`CP_OIDC_CLIENT_SECRET`（已有则不覆盖）
+- [x] Admin API：`GET/PUT/DELETE /api/admin/secrets`（列表永不返回明文；set/unset 写审计）
+- [x] Worker 按任务从 vault 解密模型密钥；钉钉 SSO/IM 换票走 vault
+- [x] DSH `dsh-credentials-pg` 运行时 Provider（worker 与公司 profile 按请求 resolve）
+- [x] MCP / 模型密钥引用化（`apiKeyEnv` / `EMBED_API_KEY` 从 vault 解析；网关密钥等 03 部署）
 
 ## 验收标准
 
-- [ ] 密钥明文不出现在配置/日志/会话事件（telemetry 结构性排除）
-- [ ] 轮换后下一个请求即用新密钥
-- [ ] 凭据解析行为全部可审计
+- [x] 密钥明文不出现在 admin 列表/审计 payload（只记 ref）
+- [x] 轮换后下一次 `resolve` / 下一任务即用新密钥
+- [ ] 每次 resolve 都记审计（热路径；v1 只审计 set/unset/bootstrap）
 
 ## Comments
+
+> 2026-08-20：**D20 v1 落地**。`apps/control-plane/src/secrets/`：AES-256-GCM + `credential_secrets` 表；主密钥 `SECRETS_MASTER_KEY`（本地回退 `CP_JWT_SECRET`）。vault 优先于 env，所以 admin 轮换立刻生效，`.env` 只作空库 bootstrap。
+>
+> 2026-08-20：**DSH `credentials-pg` Provider**。`dsh-source/packages/credentials/credentials-pg/` 实现 `ctx.credentials`：每请求读 vault、不缓存；worker.cordis.yml 与公司 profile 已挂载。MCP `EMBED_API_KEY` 同样进 vault（bootstrap + worker 注入子进程）。交互容器仍持有主密钥（HTTP resolve 路径见 README 遗留）。

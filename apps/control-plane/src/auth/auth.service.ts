@@ -88,7 +88,7 @@ export class AuthService {
     if (!externalId) throw new Error('钉钉 userinfo 缺少 unionId')
     const name = String(profile.nick ?? externalId)
     // 部门：OAuth userinfo 不返回部门（组织架构同步补齐前，角色走 D12 关键词/覆盖表）
-    const user = this.users.upsert({ externalId, name, dept: '未知部门' })
+    const user = await this.users.upsert({ externalId, name, dept: '未知部门' })
     const token = this.issueToken(this.users.toAuthUser(user))
     this.audit.append({ userId: user.id, eventType: 'auth.login', payload: { mode: 'oidc', externalId } })
     return { user: this.users.toAuthUser(user), accessToken: token.accessToken }

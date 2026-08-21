@@ -37,7 +37,7 @@ export class UsersController {
     if (!before) throw new HttpException('user not found', HttpStatus.NOT_FOUND)
     const role = parseRole(body.role)
     const status = parseStatus(body.status)
-    const user = this.users.patch(id, { status, role, dept: body.dept })
+    const user = await this.users.patch(id, { status, role, dept: body.dept })
     const roleOrDeptChanged =
       (role !== undefined && role !== before.role) || (body.dept !== undefined && body.dept !== before.dept)
     if (status === 'disabled' || roleOrDeptChanged) {

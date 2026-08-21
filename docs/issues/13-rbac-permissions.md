@@ -36,3 +36,5 @@ spec §5 Phase 2「权限分级：普通员工（workspace-write + ask）/ 开�
 > 遗留：权限点全量应用到既有管理端点（当前 admin 端点多为 @Roles 等效）；部门级策略覆盖（等 07 组织同步）；开发者审计查看权限按需放开。
 >
 > 2026-08-21：**权限点全量落地 + DSH preset 对接**。`@RequirePermission` + 可注入 PermissionGuard（拒绝写 `authz.denied`）；JWT 每次请求刷新 live 角色。角色默认 `employee=workspace-write`、`developer/admin=danger-full-access`，经 `DSH_PERMISSION_MODE` 注入 Web 实例与 worker（base bundle / worker.cordis 已读该 env）。部门覆盖：`CP_DEPT_PERMISSION` + `PUT /api/admin/permissions/overlays`（内存，优先于角色）。改角色/部门会回收旧实例，新会话 pin 新 preset。自定义角色与 users 落 PG 仍未做。
+>
+> 2026-08-21（二）：**users 落 PG**。迁移 `007_users.sql`（id 改为 text、dept 名、role_override）。hydrate 时 PG 覆盖种子，缺行再回写；patch/upsert 双写。禁用与角色覆盖跨重启保留。自定义角色仍未做。

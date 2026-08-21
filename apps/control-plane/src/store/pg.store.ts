@@ -512,4 +512,40 @@ export class PgStore {
     )
     return res.rows
   }
+
+  // --- 13：users 落 PG（字符串 id；部门名 + 角色覆盖） ---
+
+  async listUsers(): Promise<UserRow[]> {
+    const res = await this.pool!.query<UserRow>(
+      `SELECT id, external_id AS "externalId", name, COALESCE(dept, '') AS dept, role, status,
+              role_override AS "roleOverride"
+       FROM users ORDER BY created_at`,
+    )
+    return res.rows
+  }
+
+  async upsertUser(u: UserRow): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO users (id, external_id, name, dept, role, status, role_override, idp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'dingtalk')
+       ON CONFLICT (id) DO UPDATE SET
+         external_id = excluded.external_id,
+         name = excluded.name,
+         dept = excluded.dept,
+         role = excluded.role,
+         status = excluded.status,
+         role_override = excluded.role_override`,
+      [u.id, u.externalId, u.name, u.dept, u.role, u.status, u.roleOverride],
+    )
+  }
+}
+
+export interface UserRow {
+  id: string
+  externalId: string
+  name: string
+  dept: string
+  role: string
+  status: string
+  roleOverride: string | null
 }

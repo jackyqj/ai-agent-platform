@@ -26,7 +26,7 @@ PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可�
 # 迁移（幂等，可重复执行）——迁移脚本在控制面包内
 CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < apps/control-plane/migrations/001_init.sql
-... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql
+... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql ... 007_users.sql
 # 样例数据（试点报表场景）
 podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < services/mcp-db/seed.sql   #（或按 mcp-db README 手建 demo_sales）

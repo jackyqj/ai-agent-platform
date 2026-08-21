@@ -61,11 +61,11 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
 
     // 身份解析：unionId 与 Web SSO 同一身份键；通讯录接口不可用时退化为 ding:staffId
     const unionId = (await this.api.staffToUnionId(m.senderStaffId).catch(() => undefined)) ?? `ding:${m.senderStaffId}`
-    const user = this.users.findByExternal(unionId) ?? this.users.upsert({
+    const user = this.users.findByExternal(unionId) ?? (await this.users.upsert({
       externalId: unionId,
       name: m.senderNick ?? m.senderStaffId,
       dept: '未知部门', // 组织同步补齐前，角色走 D12 本地覆盖表
-    })
+    }))
 
     const presetId = routePreset(content)
     let taskId: string

@@ -1,0 +1,82 @@
+import { describe, it, expect } from 'vitest';
+import { createClient } from './store-client';
+
+function memStorage() {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+  };
+}
+
+function okJson(obj: unknown) {
+  return { ok: true, status: 200, json: async () => obj } as unknown as Response;
+}
+
+interface FetchCall {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+function stubFetch(fn: (url: string, opts?: RequestInit) => Promise<Response>) {
+  const calls: FetchCall[] = [];
+  globalThis.fetch = (async (url: unknown, opts?: RequestInit) => {
+    const u = String(url);
+    calls.push({
+      url: u,
+      method: opts?.method,
+      headers: opts?.headers as Record<string, string> | undefined,
+      body: opts?.body as string | undefined,
+    });
+    return fn(u, opts);
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+describe('store-client', () => {
+  it('devLogin persists token and it flows into the auth header', async () => {
+    const calls = stubFetch(async (url) => {
+      if (url.includes('/auth/dev/login')) return okJson({ accessToken: 'tok123' });
+      if (url.includes('/me')) return okJson({ role: 'admin' });
+      throw new Error('unexpected ' + url);
+    });
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.devLogin('u-admin');
+    await c.me();
+    expect(calls[1].url).toBe('http://x/api/me');
+    expect(calls[1].headers).toMatchObject({ Authorization: 'Bearer tok123' });
+    expect(c.token).toBe('tok123');
+  });
+
+  it('query params drop empty/undefined values', async () => {
+    let seen = '';
+    stubFetch(async (url) => { seen = url; return okJson({ sessions: [] }); });
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.admin.sessions({ userId: 'u1', dept: '', from: undefined });
+    expect(seen).toBe('http://x/api/admin/sessions?userId=u1');
+  });
+
+  it('non-OK responses throw the server message', async () => {
+    stubFetch(async () => ({ ok: false, status: 403, json: async () => ({ message: 'forbidden' }) }) as unknown as Response);
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await expect(c.admin.users()).rejects.toThrow('forbidden');
+  });
+
+  it('non-JSON error bodies fall back to the status code', async () => {
+    stubFetch(async () => ({ ok: false, status: 502, json: async () => { throw new Error('bad'); } }) as unknown as Response);
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await expect(c.me()).rejects.toThrow('502');
+  });
+
+  it('POST bodies serialize as JSON with content-type', async () => {
+    const calls = stubFetch(async () => okJson({ sessionId: 's1' }));
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.createSession('assistant');
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant' }));
+  });
+});

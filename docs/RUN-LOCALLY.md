@@ -82,14 +82,22 @@ export DSH_MODEL="${DS_API_MODEL:-deepseek-v4-flash}"
 
 Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`，内含知识库/数据库两个 MCP Server）。
 
-## 4. 启动商店 UI
+## 4. 启动商店 UI（Vite + React + TS）
 
 ```sh
 cd web/store
-python3 -m http.server 8080 --bind 127.0.0.1
-# 商店：http://127.0.0.1:8080/index.html
-# 管理后台：http://127.0.0.1:8080/admin.html（u-admin 登录；CORS 已放行）
+npm install
+npm run dev          # Vite 开发服务器 → http://127.0.0.1:5173
+# /api 由 Vite 代理到 http://127.0.0.1:4000（无需 CORS）
+# 商店（单页入口）：http://127.0.0.1:5173/
+# 管理后台：http://127.0.0.1:5173/#admin（u-admin 登录后顶部「管理」导航）
+# admin.html 保留为跳转兼容页
 ```
+
+> UI 结构（`src/`）：`store-client.ts`（类型化 HTTP 访问，领域方法）、`useApp.ts`（状态 + actions）、
+> `App.tsx`/`StoreView.tsx`/`AdminView.tsx`（视图）、`types.ts`（领域类型）、`styles.css`（探针台主题）。
+> 测试：`npm test`（Vitest + React Testing Library）。构建：`npm run build` → `dist/`
+> （静态产物需由同一 origin 反代 `/api` 到 `:4000`）。
 
 ## 5. 演示流程
 
@@ -124,7 +132,7 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 ```
 
 ### E. 管理后台 v1（10 工单）
-- 打开 http://127.0.0.1:8080/admin.html，用 `u-admin` 登录
+- 打开 http://127.0.0.1:5173/#admin，用 `u-admin` 登录（或商店页顶部「管理」导航）
 - **3 步找会话**：用户表点「会话」→ 会话表点一行 → 下方事件摘要
 - 禁用 `u-hr-1`：其实例立即回收；该用户再调 API 返回 401 `user disabled`
 - 模型配置为只读（03 网关未部署）；审计区可按 userId / sessionId / eventType 过滤

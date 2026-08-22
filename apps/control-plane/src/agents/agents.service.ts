@@ -1,7 +1,7 @@
 // Agent 商店目录服务 + 编排（12 工单 + agent-orchestration-design.md）
 // 目录元数据在 PG（agent_presets 表）；编排 spec（AgentSpec）经 AgentComposer 编译为
 // agent.cordis.yml / preset.yml，由 PresetFileStore 写入 preset 根。
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { PgStore } from '../store/pg.store.js'
 import { AgentComposer } from './composer.js'
 import { PRESET_FILE_STORE, type PresetFileStore } from './preset-file-store.js'
@@ -76,7 +76,7 @@ interface RevisionRow {
 }
 
 @Injectable()
-export class AgentsService {
+export class AgentsService implements OnModuleInit {
   private logger = new Logger('Agents')
   private memory = new Map<string, AgentPreset>()
   // pool=null（开发/冒烟/测试）时的编排回退
@@ -103,6 +103,18 @@ export class AgentsService {
 
   private async persist(): Promise<boolean> {
     return this.pg.pool !== null
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.syncSeedsToPg()
+  }
+
+  /** 种子入库：只补缺失 id，不覆盖已有（避免误升 version）。 */
+  private async syncSeedsToPg(): Promise<void> {
+    if (!(await this.persist())) return
+    for (const p of this.memory.values()) {
+      await this.pg.insertAgentPresetIfMissing(p).catch((e) => this.logger.error(`seed ${p.id} failed: ${(e as Error).message}`))
+    }
   }
 
   // ── 目录（12 工单，原有）──────────────────────────────────────

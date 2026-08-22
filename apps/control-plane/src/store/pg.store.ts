@@ -275,6 +275,19 @@ export class PgStore {
     )
   }
 
+  /** 种子入库：只插入缺失的 id，不覆盖已有（避免 upsert 误升 version）。 */
+  async insertAgentPresetIfMissing(p: {
+    id: string; name: string; description: string; visibility: unknown
+    modelRoute: unknown; approvalLevel: string; status: string
+  }): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1)
+       ON CONFLICT (id) DO NOTHING`,
+      [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status],
+    )
+  }
+
   async listAgentPresets(): Promise<Record<string, unknown>[]> {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",

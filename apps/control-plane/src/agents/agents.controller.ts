@@ -84,12 +84,12 @@ export class AgentsController {
     }
   }
 
-  /** 仅校验，不保存（编辑器实时提示） */
+  /** 编辑器实时预览：校验 + 编译后的 YAML（不保存） */
   @Post('agents/:id/validate')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.edit')
   async validate(@Body() body: { spec: AgentSpec }) {
-    return this.agents.validateSpec(body.spec)
+    return this.agents.previewSpec(body.spec)
   }
 
   /** 发布：compile → PG 事务（修订 + 投影列 + version+1）→ 原子写文件 */
@@ -178,11 +178,11 @@ export class AgentsController {
   @Post('admin/agents/:id/approve')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.approve')
-  async approve(@Param('id') id: string) {
+  async approve(@Req() req: { user: { sub: string } }, @Param('id') id: string) {
     try {
-      const a = await this.agents.approve(id)
+      const a = await this.agents.approve(id, req.user.sub)
       if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
-      return { agent: a, notice: '已批准：preset 文件已生成并上架' }
+      return { agent: a, notice: '已批准：spec 已发布' }
     } catch (e) {
       throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
     }

@@ -117,3 +117,23 @@ test('validateSpec: 直接校验不落库', () => {
   assert.deepEqual(svc.validateSpec(seed), { ok: true })
   assert.equal(svc.validateSpec({ ...seed, mcp: ['nope'] }).ok, false)
 })
+
+test('propose/approve: 复制已发布 spec 为工作副本，approve 走 publishSpec（不再复制模板 YAML）', async () => {
+  const svc = makeService()
+  const files = (svc as unknown as { files: MemoryPresetFileStore }).files
+  await svc.propose({ id: 'hr-flow', name: 'HR 流程助手', description: '流程咨询', basedOn: 'hr-assistant' }, 'u-dev')
+  const view = await svc.getSpec('hr-flow')
+  assert.equal(view.spec.id, 'hr-flow')
+  assert.equal(view.spec.name, 'HR 流程助手')
+  assert.deepEqual(view.spec.mcp, ['kb'], '继承模板的 mcp 白名单')
+  assert.equal(view.dirty, true, 'propose 写入了工作副本')
+  assert.equal(files.get('hr-flow'), undefined, 'propose 不写文件')
+
+  await svc.approve('hr-flow', 'u-admin')
+  const written = files.get('hr-flow')
+  assert.ok(written, 'approve 走 publishSpec，应写 preset 文件')
+  assert.ok(written!.cordisYaml.includes('allowedServers'))
+  const preset = await svc.get('hr-flow')
+  assert.equal(preset?.status, 'published')
+  assert.equal(preset?.version, 2)
+})

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { type Actions } from './useApp';
+import AgentComposeView from './AgentComposeView';
 import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge } from './ui';
 import { fmtTs, shortId } from './util';
 import type { AdminPane, AppState } from './types';
@@ -27,6 +28,8 @@ type Pending =
 export default function AdminView({ state, act }: Props) {
   const [pending, setPending] = useState<Pending | null>(null);
   const pane = state.adminPane;
+
+  if (state.compose) return <AgentComposeView state={state} act={act} />;
 
   function setPane(id: AdminPane, hash: string) {
     act.update({ adminPane: id });
@@ -192,11 +195,14 @@ function AgentsSection({ state, act, onUnpublish }: Props & { onUnpublish: (id: 
                 <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
                 <Badge tone="b-cloud">{a.status}</Badge>
               </span>
-              {a.status === 'published' ? (
-                <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
-              ) : (
-                <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
-              )}
+              <span className="row" style={{ gap: 6 }}>
+                <button className="ghost small" onClick={() => void act.openCompose(a.id)}>编排</button>
+                {a.status === 'published' ? (
+                  <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
+                ) : (
+                  <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
+                )}
+              </span>
             </div>
           ))}
         </div>

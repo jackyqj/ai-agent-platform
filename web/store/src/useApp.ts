@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
-import type { AdminPane, AppState, Route } from './types';
+import type { AdminPane, AgentSpec, AppState, Route } from './types';
 import { localToIso } from './util';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -55,6 +55,7 @@ const initial: AppState = {
   ovPreset: 'workspace-write',
 
   errors: {},
+  compose: null,
 };
 
 export interface Actions {
@@ -71,6 +72,13 @@ export interface Actions {
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
+  openCompose(agentId: string): Promise<void>;
+  closeCompose(): void;
+  editComposeSpec(patch: Partial<AgentSpec>): void;
+  refreshComposePreview(): Promise<void>;
+  saveComposeSpec(): Promise<void>;
+  publishCompose(): Promise<void>;
+  rollbackCompose(toVersion: number): Promise<void>;
   setQuota(): Promise<void>;
   focusUser(id: string): void;
   editUser(id: string, patch: { dept?: string; role?: string }): void;
@@ -238,6 +246,105 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     }
   }
 
+  // ── Agent 编排（agent-orchestration-design.md §9）──
+
+  async function loadCompose(agentId: string) {
+    const [catalog, specView, revisions] = await Promise.all([
+      client.capabilities(),
+      client.getSpec(agentId),
+      client.listRevisions(agentId).catch(() => ({ revisions: [] })),
+    ]);
+    const preview = await client.previewSpec(agentId, specView.spec);
+    setState((prev) => ({
+      ...prev,
+      compose: {
+        agentId,
+        spec: specView.spec,
+        catalog,
+        version: specView.version,
+        dirty: specView.dirty,
+        updatedBy: specView.updatedBy,
+        updatedAt: specView.updatedAt,
+        previewYaml: preview.yaml,
+        issues: preview.validation.ok ? [] : (preview.validation.errors ?? []),
+        revisions: revisions.revisions ?? [],
+        saving: prev.compose?.saving ?? false,
+        publishing: prev.compose?.publishing ?? false,
+      },
+    }));
+  }
+
+  async function openCompose(agentId: string) {
+    try {
+      await loadCompose(agentId);
+    } catch (e) {
+      notify('打开编排失败：' + (e as Error).message, true);
+    }
+  }
+
+  function closeCompose() {
+    setState((prev) => ({ ...prev, compose: null }));
+  }
+
+  function editComposeSpec(patch: Partial<AgentSpec>) {
+    setState((prev) => {
+      if (!prev.compose?.spec) return prev;
+      return { ...prev, compose: { ...prev.compose, spec: { ...prev.compose.spec, ...patch }, dirty: true } };
+    });
+  }
+
+  async function refreshComposePreview() {
+    if (!state.compose?.spec) return;
+    try {
+      const preview = await client.previewSpec(state.compose.agentId, state.compose.spec);
+      setState((prev) => prev.compose
+        ? { ...prev, compose: { ...prev.compose, previewYaml: preview.yaml, issues: preview.validation.ok ? [] : (preview.validation.errors ?? []) } }
+        : prev);
+    } catch (e) {
+      notify('预览失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function saveComposeSpec() {
+    if (!state.compose?.spec) return;
+    const { agentId, spec, updatedAt } = state.compose;
+    setState((prev) => prev.compose ? { ...prev, compose: { ...prev.compose, saving: true } } : prev);
+    try {
+      await client.putSpec(agentId, spec, updatedAt);
+      await loadCompose(agentId);
+      notify('已保存草稿');
+    } catch (e) {
+      notify('保存失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function publishCompose() {
+    if (!state.compose) return;
+    const { agentId, version } = state.compose;
+    setState((prev) => prev.compose ? { ...prev, compose: { ...prev.compose, publishing: true } } : prev);
+    try {
+      const r = await client.publishSpec(agentId, version);
+      await loadCompose(agentId);
+      await loadStore();
+      notify('已发布 v' + r.version);
+    } catch (e) {
+      notify('发布失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function rollbackCompose(toVersion: number) {
+    if (!state.compose) return;
+    const { agentId } = state.compose;
+    try {
+      const r = await client.rollback(agentId, toVersion);
+      await loadCompose(agentId);
+      await loadStore();
+      notify(r.notice);
+    } catch (e) {
+      notify('回滚失败：' + (e as Error).message, true);
+    }
+  }
+
   async function decide(id: string, approve: boolean) {
     try {
       await client.admin.decideApproval(id, approve);
@@ -397,6 +504,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     decide, toggleAgent, setQuota, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
+    openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,
   };
 
   return { state, act };

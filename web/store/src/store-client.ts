@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, Approval, AuditEvent, Instance, Me, ModelsBody, QuotaPolicy, SessionRow, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaPolicy, Revision, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -37,6 +37,15 @@ export interface Client {
   submitTask(agentPresetId: string, task: string): Promise<TaskSubmitResult>;
   getTask(id: string): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
+
+  // ── Agent 编排（agent-orchestration-design.md §8）──
+  capabilities(): Promise<CapabilityCatalog>;
+  getSpec(id: string): Promise<SpecView>;
+  putSpec(id: string, spec: AgentSpec, expectedUpdatedAt?: string): Promise<{ notice: string }>;
+  previewSpec(id: string, spec: AgentSpec): Promise<PreviewResult>;
+  publishSpec(id: string, expectedVersion: number): Promise<{ agent: Agent; version: number; notice: string }>;
+  listRevisions(id: string): Promise<{ revisions: Revision[] }>;
+  rollback(id: string, toVersion: number): Promise<{ agent: Agent; version: number; notice: string }>;
 
   admin: {
     pendingApprovals(): Promise<{ approvals: Approval[] }>;
@@ -122,6 +131,14 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     submitTask: (agentPresetId, task) => request<TaskSubmitResult>('/tasks', { method: 'POST', body: { agentPresetId, task } }),
     getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
+
+    capabilities: () => request<CapabilityCatalog>('/capabilities'),
+    getSpec: (id) => request<SpecView>(`/agents/${id}/spec`),
+    putSpec: (id, spec, expectedUpdatedAt) => request<{ notice: string }>(`/agents/${id}/spec`, { method: 'PUT', body: { spec, expectedUpdatedAt } }),
+    previewSpec: (id, spec) => request<PreviewResult>(`/agents/${id}/validate`, { method: 'POST', body: { spec } }),
+    publishSpec: (id, expectedVersion) => request<{ agent: Agent; version: number; notice: string }>(`/admin/agents/${id}/publish`, { method: 'POST', body: { expectedVersion } }),
+    listRevisions: (id) => request<{ revisions: Revision[] }>(`/admin/agents/${id}/revisions`),
+    rollback: (id, toVersion) => request<{ agent: Agent; version: number; notice: string }>(`/admin/agents/${id}/rollback`, { method: 'POST', body: { toVersion } }),
 
     admin: {
       pendingApprovals: () => request<{ approvals: Approval[] }>('/admin/approvals/pending'),

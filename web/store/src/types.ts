@@ -177,4 +177,82 @@ export interface AppState {
   ovPreset: string;
 
   errors: Record<string, string>;
+
+  compose: ComposeState | null;
+}
+
+// ── Agent 编排（agent-orchestration-design.md）──────────────────
+
+export interface ModelDef {
+  provider: string;
+  model: string;
+  label: string;
+}
+
+export interface McpServerDef {
+  serverName: string;
+  label: string;
+  description: string;
+}
+
+export interface HostDef {
+  id: string;
+  label: string;
+}
+
+export interface CapabilityCatalog {
+  models: ModelDef[];
+  mcpServers: McpServerDef[];
+  hostPlane: HostDef[];
+}
+
+export interface AgentSpec {
+  id: string;
+  name: string;
+  description: string;
+  visibility: { departments?: string[]; roles?: string[] };
+  approvalLevel: 'none' | 'self' | 'manager';
+  modelRoute: { provider: string; model: string; pinned: boolean };
+  persona: string;
+  mcp: string[];
+}
+
+export interface SpecView {
+  spec: AgentSpec;
+  version: number;
+  dirty: boolean;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface Revision {
+  version: number;
+  spec: AgentSpec;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+export interface ValidationIssue {
+  path: string;
+  message: string;
+}
+
+export interface PreviewResult {
+  validation: { ok: boolean; errors?: ValidationIssue[] };
+  yaml: string;
+}
+
+export interface ComposeState {
+  agentId: string;
+  spec: AgentSpec | null;
+  catalog: CapabilityCatalog | null;
+  version: number;
+  dirty: boolean;
+  updatedBy?: string;
+  updatedAt?: string;
+  previewYaml: string;
+  issues: ValidationIssue[];
+  revisions: Revision[];
+  saving: boolean;
+  publishing: boolean;
 }

@@ -200,6 +200,13 @@ export class AgentsService {
     return this.composer.validate(spec)
   }
 
+  /** 编辑器实时预览：校验 + 编译后的 YAML（§9 右栏只读预览的数据源）。 */
+  previewSpec(spec: AgentSpec): { validation: ValidationResult; yaml: string } {
+    const validation = this.composer.validate(spec)
+    const yaml = this.composer.serialize(this.composer.compile(spec))
+    return { validation, yaml }
+  }
+
   async putSpec(id: string, spec: AgentSpec, byUserId: string, expectedUpdatedAt?: string): Promise<void> {
     if (spec.id !== id) throw new Error(`spec.id "${spec.id}" 与路径 id "${id}" 不一致`)
     const result = this.composer.validate(spec)
@@ -289,11 +296,7 @@ export class AgentsService {
     return next
   }
 
-  // ── 员工自建提审（12 工单，原有；P2 改为复制已发布 spec）──────
-
-  private presetRoot(): string {
-    return process.env.CP_PRESET_ROOT ?? '/Users/jac/sw_dir/ai-agent-platform/.dsh-home/presets-company'
-  }
+  // ── 员工自建提审（12 工单；P2 改为复制已发布 spec）────────────
 
   async propose(input: { id: string; name: string; description: string; basedOn: string }, byUserId: string): Promise<AgentPreset> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(input.id)) throw new Error('id 须为小写字母/数字/中划线，且不以中划线开头')
@@ -301,38 +304,33 @@ export class AgentsService {
     if (existing) throw new Error(`agent ${input.id} 已存在`)
     const template = await this.get(input.basedOn)
     if (!template) throw new Error(`模板 agent ${input.basedOn} 不存在`)
+    // 从模板的已发布 spec 复制完整工作副本（§8：不再只复制目录元数据）
+    const baseSpec = await this.currentSpec(input.basedOn)
+    const draftSpec: AgentSpec = { ...baseSpec, id: input.id, name: input.name, description: input.description }
     const draft: AgentPreset = {
       id: input.id, name: input.name, description: input.description,
-      visibility: {}, modelRoute: template.modelRoute, approvalLevel: template.approvalLevel,
+      visibility: draftSpec.visibility, modelRoute: draftSpec.modelRoute, approvalLevel: draftSpec.approvalLevel,
       status: 'draft', version: 1,
     }
     if (await this.persist()) {
       await this.pg.upsertAgentPreset(draft)
       await this.pg.updateAgentPresetBasedOn(input.id, input.basedOn)
+      await this.pg.updateAgentComposition(input.id, draftSpec, byUserId)
     } else {
       this.memory.set(input.id, draft)
+      this.memoryComposition.set(input.id, draftSpec)
     }
-    this.logger.log(`proposed ${input.id} (based on ${input.basedOn}) by ${byUserId}`)
+    this.logger.log(`proposed ${input.id} (based on ${input.basedOn} spec) by ${byUserId}`)
     return draft
   }
 
-  async approve(id: string): Promise<AgentPreset | undefined> {
-    const row = await this.pg.getAgentPreset(id)
-    if (!row) return undefined
-    const basedOn = String(row.based_on ?? 'assistant')
-    const root = this.presetRoot()
-    const { readFile, writeFile, mkdir } = await import('node:fs/promises')
-    const { join } = await import('node:path')
-    const templateComposition = await readFile(join(root, basedOn, 'agent.cordis.yml'), 'utf8').catch(() => {
-      throw new Error(`模板目录 ${basedOn} 缺少 agent.cordis.yml`)
-    })
-    const dir = join(root, id)
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'agent.cordis.yml'), templateComposition)
-    await writeFile(join(dir, 'preset.yml'), `name: ${String(row.name)}\ndescription: ${String(row.description ?? '')}\n`)
-    await this.pg.updateAgentPresetStatus(id, 'published')
-    this.logger.log(`approved ${id}: preset files generated at ${dir}`)
-    return this.get(id)
+  async approve(id: string, byUserId: string): Promise<AgentPreset | undefined> {
+    const preset = await this.get(id)
+    if (!preset) return undefined
+    // 对该 draft 走与 publish 相同的事务（§8：不再复制模板 YAML）
+    const r = await this.publishSpec(id, preset.version, byUserId)
+    this.logger.log(`approved ${id} → v${r.version}`)
+    return r.agent
   }
 
   async reject(id: string): Promise<AgentPreset | undefined> {

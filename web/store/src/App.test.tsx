@@ -20,6 +20,13 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
       task: { id: 't1', status: 'done', payload: { task: '你好' }, result: { finalResponse: '好的' } },
     })),
     proposeAgent: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, notice: 'ok' })),
+    capabilities: vi.fn(async () => ({ models: [], mcpServers: [], hostPlane: [] })),
+    getSpec: vi.fn(async () => ({ spec: { id: 'x', name: 'x', description: '', visibility: {}, approvalLevel: 'none' as const, modelRoute: { provider: 'p', model: 'm', pinned: false }, persona: '', mcp: [] as string[] }, version: 1, dirty: false })),
+    putSpec: vi.fn(async () => ({ notice: 'ok' })),
+    previewSpec: vi.fn(async () => ({ validation: { ok: true }, yaml: '' })),
+    publishSpec: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, version: 2, notice: 'ok' })),
+    listRevisions: vi.fn(async () => ({ revisions: [] })),
+    rollback: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, version: 3, notice: 'ok' })),
     admin: {
       pendingApprovals: vi.fn(async () => ({ approvals: [] })),
       decideApproval: vi.fn(async () => undefined),

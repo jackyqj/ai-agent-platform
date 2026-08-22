@@ -5,11 +5,14 @@ import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
 import { ApiKeyGuard, ScopeGuard, type ServiceRequest } from '../keys/api-key.guard.js'
 import { TasksService } from './tasks.service.js'
-import { can, type Role } from '../common/permissions.js'
+import { RolesService } from '../common/roles.service.js'
 
 @Controller()
 export class TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly roles: RolesService,
+  ) {}
 
   /** 服务身份触发（内部系统/IM）：X-API-Key + scope=task:create */
   @Post('service/trigger')
@@ -67,7 +70,7 @@ export class TasksController {
   async cancel(@Req() req: { user: { sub: string; role: string } }, @Param('id') id: string) {
     const t = await this.tasks.get(id)
     if (!t) throw new HttpException('task not found', HttpStatus.NOT_FOUND)
-    if (t.userId !== req.user.sub && !can(req.user.role as Role, 'task.view_all')) {
+    if (t.userId !== req.user.sub && !this.roles.can(req.user.role, 'task.view_all')) {
       throw new HttpException('forbidden', HttpStatus.FORBIDDEN)
     }
     try {

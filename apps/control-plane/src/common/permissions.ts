@@ -45,6 +45,8 @@ export function can(role: Role, permission: Permission): boolean {
 /** DSH `dsh-permission-presets` 表名（与 sandbox/mode 对齐，经 DSH_PERMISSION_MODE 注入） */
 export type DshPresetName = 'read-only' | 'workspace-write' | 'danger-full-access'
 
+export const DSH_PRESETS: DshPresetName[] = ['read-only', 'workspace-write', 'danger-full-access']
+
 export const ROLE_DSH_PRESET: Record<Role, DshPresetName> = {
   employee: 'workspace-write',
   developer: 'danger-full-access',
@@ -57,6 +59,10 @@ export function isDshPresetName(value: string): value is DshPresetName {
 
 export function isRole(value: string): value is Role {
   return value === 'employee' || value === 'developer' || value === 'admin'
+}
+
+export function isPermission(value: string): value is Permission {
+  return Object.prototype.hasOwnProperty.call(PERMISSIONS, value)
 }
 
 /** `CP_DEPT_PERMISSION`：部门名:preset 逗号分隔，覆盖角色默认 */

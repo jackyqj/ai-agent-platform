@@ -4,7 +4,7 @@ import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { PermissionPolicyService } from '../common/permission-policy.service.js'
-import { isDshPresetName, PERMISSIONS, ROLE_DSH_PRESET } from '../common/permissions.js'
+import { isDshPresetName, DSH_PRESETS, PERMISSIONS, ROLE_DSH_PRESET } from '../common/permissions.js'
 
 @Controller('admin/permissions')
 @UseGuards(AuthGuard, PermissionGuard)
@@ -20,6 +20,7 @@ export class AdminPermissionsController {
     return {
       rolePresets: ROLE_DSH_PRESET,
       matrix: PERMISSIONS,
+      presets: DSH_PRESETS,
       deptOverlays: this.policies.listOverlays(),
     }
   }

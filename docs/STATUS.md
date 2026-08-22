@@ -18,7 +18,7 @@
 | 19 任务队列 | BullMQ + Worker（TS SDK 驱动运行时）+ 可靠性五件套 | 触发→执行→done；重试 3/3/超时/取消/串行/孤儿全验 | 步骤级轨迹（用户已决定不补）、IM/回调 |
 | 09 集中凭据 | PG AES-256-GCM vault + admin API + bootstrap + `dsh-credentials-pg`（PG 或 HTTP resolve）+ 每次 resolve 审计 | 单测：vault 优先/轮换/describe 无明文；HTTP 不持主密钥；resolve 审计无明文 | 容器 DNS（`host.containers.internal`）；worker 直连 PG 的 resolve 不经控制面；网关密钥等 03 |
 | 10 管理后台 v1 | 静态管理页 + 用户启用/禁用（立即回收实例、JWT 拒绝）+ 管理员会话检索/事件摘要 + 实例回收 + 只读模型配置 + 审计查询 | 单测：disable/patch、admin list 无 routing_secret、closeAll 回收实例、sessionId 审计过滤 | 网关未部署故模型配置只读；未做 React 门户 |
-| 13 RBAC | 权限点全量应用到管理端点 + 拒绝审计；角色→DSH_PERMISSION_MODE；部门 overlay；**users 落 PG**（禁用/角色覆盖跨重启） | 单测：preset 解析/部门覆盖、employee 拒 user.manage 并留痕；disable/override 经同一 store 重启仍在 | 自定义角色；组织架构定时同步（07） |
+| 13 RBAC | 权限点全量应用到管理端点 + 拒绝审计；角色→DSH_PERMISSION_MODE；部门 overlay；**users 落 PG**（禁用/角色覆盖跨重启）+ **自定义角色**（role_definitions 表：角色名+权限点集合+DSH preset；守卫/权限策略接入；管理后台角色管理；可指派给用户） | 单测：preset 解析/部门覆盖、employee 拒 user.manage 并留痕；disable/override 经同一 store 重启仍在 | 组织架构定时同步（07） |
 
 ## 🟡 部分完成（部署包/材料就绪，待资源或真人）
 

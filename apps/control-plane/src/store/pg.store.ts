@@ -710,6 +710,31 @@ export class PgStore {
     return res.rows
   }
 
+  // --- 13：自定义角色（role_definitions 表） ---
+
+  async listRoleDefinitions(): Promise<Record<string, unknown>[]> {
+    const res = await this.pool!.query(
+      `SELECT name, permissions, dsh_preset AS "dshPreset", updated_at AS "updatedAt"
+       FROM role_definitions ORDER BY name`,
+    )
+    return res.rows
+  }
+
+  async upsertRoleDefinition(r: { name: string; permissions: string[]; dshPreset: string }): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO role_definitions (name, permissions, dsh_preset)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (name) DO UPDATE SET
+         permissions = excluded.permissions, dsh_preset = excluded.dsh_preset, updated_at = now()`,
+      [r.name, JSON.stringify(r.permissions), r.dshPreset],
+    )
+  }
+
+  async deleteRoleDefinition(name: string): Promise<boolean> {
+    const res = await this.pool!.query(`DELETE FROM role_definitions WHERE name = $1`, [name])
+    return (res.rowCount ?? 0) > 0
+  }
+
   // --- 13：users 落 PG（字符串 id；部门名 + 角色覆盖） ---
 
   async listUsers(): Promise<UserRow[]> {

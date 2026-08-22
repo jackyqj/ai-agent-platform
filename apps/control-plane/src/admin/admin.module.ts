@@ -4,10 +4,11 @@ import { SessionsModule } from '../sessions/sessions.module.js'
 import { UsersModule } from '../users/users.module.js'
 import { AdminModelsController } from './admin-models.controller.js'
 import { AdminPermissionsController } from './admin-permissions.controller.js'
+import { AdminRolesController } from './admin-roles.controller.js'
 import { AdminSessionsController } from './admin-sessions.controller.js'
 
 @Module({
   imports: [UsersModule, SessionsModule, AgentsModule],
-  controllers: [AdminSessionsController, AdminModelsController, AdminPermissionsController],
+  controllers: [AdminSessionsController, AdminModelsController, AdminPermissionsController, AdminRolesController],
 })
 export class AdminModule {}

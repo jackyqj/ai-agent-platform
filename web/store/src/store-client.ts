@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -74,12 +74,15 @@ export interface Client {
     instances(): Promise<{ count: number; instances: Instance[] }>;
     stopInstance(id: string): Promise<unknown>;
     reapIdle(): Promise<{ reaped: string[] }>;
-    permissions(): Promise<{ deptOverlays: Record<string, string> }>;
+    permissions(): Promise<{ deptOverlays: Record<string, string>; matrix: Record<string, string[]>; rolePresets: Record<string, string>; presets: string[] }>;
     setOverlay(dept: string, preset: string | null): Promise<unknown>;
     models(): Promise<ModelsBody>;
     auditEvents(query: Record<string, string>): Promise<{ events: AuditEvent[] }>;
     allScheduled(): Promise<{ tasks: ScheduledTask[] }>;
     scheduledRuns(query: Record<string, string>): Promise<{ runs: ScheduledRunLog[] }>;
+    roles(): Promise<{ roles: RoleDef[] }>;
+    upsertRole(body: { name: string; permissions: string[]; dshPreset: string }): Promise<{ ok: boolean; roles: RoleDef[] }>;
+    removeRole(name: string): Promise<{ ok: boolean; roles: RoleDef[] }>;
   };
 }
 
@@ -181,12 +184,15 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       instances: () => request<{ count: number; instances: Instance[] }>('/admin/instances'),
       stopInstance: (id) => request(`/admin/instances/${id}/stop`, { method: 'POST', body: {} }),
       reapIdle: () => request<{ reaped: string[] }>('/admin/instances/reap', { method: 'POST', body: {} }),
-      permissions: () => request<{ deptOverlays: Record<string, string> }>('/admin/permissions'),
+      permissions: () => request<{ deptOverlays: Record<string, string>; matrix: Record<string, string[]>; rolePresets: Record<string, string>; presets: string[] }>('/admin/permissions'),
       setOverlay: (dept, preset) => request('/admin/permissions/overlays', { method: 'PUT', body: { dept, preset } }),
       models: () => request<ModelsBody>('/admin/models'),
       auditEvents: (query) => request<{ events: AuditEvent[] }>('/admin/audit/events', { query }),
       allScheduled: () => request<{ tasks: ScheduledTask[] }>('/admin/scheduled-tasks'),
       scheduledRuns: (query) => request<{ runs: ScheduledRunLog[] }>('/admin/scheduled-runs', { query }),
+      roles: () => request<{ roles: RoleDef[] }>('/admin/roles'),
+      upsertRole: (body) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles', { method: 'POST', body }),
+      removeRole: (name) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles/' + encodeURIComponent(name), { method: 'DELETE' }),
     },
   };
 }

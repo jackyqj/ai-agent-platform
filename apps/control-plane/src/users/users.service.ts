@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { loadConfig } from '../config/config.js'
 import type { AuthUser } from '../common/auth.guard.js'
 import { isRole, type Role } from '../common/permissions.js'
+import { RolesService } from '../common/roles.service.js'
 import { PgStore, type UserRow } from '../store/pg.store.js'
 
 export interface User {
@@ -10,7 +11,7 @@ export interface User {
   externalId: string // 钉钉用户 id（oidc 模式）/ 任意 id（dev 模式）
   name: string
   dept: string
-  role: Role
+  role: string // 预置 Role 或自定义角色名（13 工单）
   status: 'active' | 'disabled'
 }
 
@@ -18,16 +19,19 @@ export interface User {
  * 用户/组织服务（07 工单 + D12）：
  * - oidc 模式：钉钉组织架构同步 → users 表（外部 id 为主键关联）
  * - dev 模式：内存种子，便于本地开发/冒烟；PG 可用时 hydrate，补丁跨重启保留
- * - 角色映射：部门标签驱动（IT/研发=developer、指定部门=admin、其余=employee）+ 本地覆盖表
+ * - 角色映射：部门标签驱动（IT/研发=developer、指定部门=admin、其余=employee）+ 本地覆盖表 + 自定义角色（13）
  */
 @Injectable()
 export class UsersService implements OnModuleInit {
   private cfg = loadConfig()
   private users = new Map<string, User>() // id → user
   private byExternal = new Map<string, string>() // externalId → id
-  private overrides = new Map<string, Role>() // userId → role（本地覆盖，D12 例外）
+  private overrides = new Map<string, string>() // userId → role（本地覆盖，D12 例外；含自定义角色名）
 
-  constructor(private readonly pg: PgStore = new PgStore(undefined)) {
+  constructor(
+    private readonly pg: PgStore = new PgStore(undefined),
+    private readonly roles: RolesService = new RolesService(pg),
+  ) {
     // dev 种子：模拟钉钉同步结果（3 个部门 × 角色）
     this.seed('u-hr-1', 'hr-1001', '王小明', 'HR/行政', 'employee')
     this.seed('u-hr-2', 'hr-1002', '李小红', 'HR/行政', 'employee')
@@ -59,8 +63,9 @@ export class UsersService implements OnModuleInit {
   }
 
   private adopt(r: UserRow): void {
-    const override = r.roleOverride && isRole(r.roleOverride) ? r.roleOverride : undefined
-    const role = override ?? (isRole(r.role) ? r.role : this.roleForDept(r.dept))
+    const override = r.roleOverride && (isRole(r.roleOverride) || this.roles.has(r.roleOverride)) ? r.roleOverride : undefined
+    // role 列仅保留「有效」值：预置 Role 或已定义的自定义角色名；空值/悬空（已删除的角色）回退到部门推断
+    const role = override ?? ((r.role && (isRole(r.role) || this.roles.has(r.role))) ? r.role : this.roleForDept(r.dept))
     const user: User = {
       id: r.id,
       externalId: r.externalId,
@@ -148,28 +153,23 @@ export class UsersService implements OnModuleInit {
     return [...this.users.values()]
   }
 
-  setRoleOverride(userId: string, role: Role) {
+  setRoleOverride(userId: string, role: string) {
     this.overrides.set(userId, role)
     const u = this.users.get(userId)
     if (u) u.role = role
   }
 
-  /** 管理后台：启用/禁用、部门、角色覆盖（10 工单） */
-  async patch(userId: string, input: { status?: User['status']; role?: User['role']; dept?: string }): Promise<User | undefined> {
+  /** 管理后台：启用/禁用、部门、角色覆盖（10 工单 + 13 自定义角色） */
+  async patch(userId: string, input: { status?: User['status']; role?: string; dept?: string }): Promise<User | undefined> {
     const u = this.users.get(userId)
     if (!u) return undefined
     if (input.dept !== undefined) u.dept = input.dept
     if (input.role !== undefined) {
-      switch (input.role) {
-        case 'employee':
-        case 'developer':
-        case 'admin':
-          this.setRoleOverride(userId, input.role)
-          break
-        default: {
-          const _exhaustive: never = input.role
-          throw new Error(`unknown role: ${_exhaustive}`)
-        }
+      const role = input.role.trim()
+      if (isRole(role) || this.roles.has(role)) {
+        this.setRoleOverride(userId, role)
+      } else {
+        throw new Error(`未知角色：${role}`)
       }
     }
     if (input.status !== undefined) {

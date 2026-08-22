@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { UsersService } from './users.service.js'
+import { RolesService } from '../common/roles.service.js'
+import { PgStore } from '../store/pg.store.js'
 
 test('patch disables a seeded user', async () => {
   const users = new UsersService()
@@ -79,4 +81,34 @@ test('SSO upsert survives restart and keeps an admin role override', async () =>
   assert.equal(u?.name, '新人')
   assert.equal(u?.role, 'admin')
   assert.equal(u?.dept, '业务部')
+})
+
+test('patch assigns a custom role name (13 自定义角色)', async () => {
+  // 定义一个自定义角色，注入 UsersService 校验
+  const roleStore = new Map<string, { permissions: string[]; dshPreset: string }>()
+  const rolePg = {
+    pool: {},
+    listRoleDefinitions: async () => [...roleStore.entries()].map(([name, v]) => ({ name, permissions: v.permissions, dshPreset: v.dshPreset })),
+    upsertRoleDefinition: async (r: { name: string; permissions: string[]; dshPreset: string }) => roleStore.set(r.name, { permissions: r.permissions, dshPreset: r.dshPreset }),
+    deleteRoleDefinition: async (name: string) => roleStore.delete(name),
+  } as never
+  const roles = new RolesService(rolePg)
+  await roles.upsert('report-viewer', ['task.view_all'], 'read-only')
+  const users = new UsersService(new PgStore(undefined), roles)
+  const u = await users.patch('u-hr-1', { role: 'report-viewer' })
+  assert.equal(u?.role, 'report-viewer')
+})
+
+test('patch rejects an unknown custom role name', async () => {
+  const users = new UsersService()
+  await assert.rejects(users.patch('u-hr-1', { role: 'no-such-role' }), /未知角色/)
+})
+
+test('adopt falls back to dept role for a dangling custom role name', async () => {
+  const pg = new MemPg()
+  pg.rows.set('u-x', { id: 'u-x', externalId: 'x', name: '悬空', dept: '业务部', role: 'deleted-role', status: 'active', roleOverride: null })
+  const users = new UsersService(pg as never)
+  await users.onModuleInit()
+  const u = users.get('u-x')
+  assert.equal(u?.role, 'employee', '悬空自定义角色回退到部门角色(业务部→employee)')
 })

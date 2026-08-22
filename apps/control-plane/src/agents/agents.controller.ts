@@ -3,13 +3,16 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post, 
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
-import { can, type Role } from '../common/permissions.js'
+import { RolesService } from '../common/roles.service.js'
 import { AgentsService, SpecValidationError, TemplateHasNoSpecError, type AgentPreset } from './agents.service.js'
 import type { AgentSpec } from './types.js'
 
 @Controller()
 export class AgentsController {
-  constructor(private readonly agents: AgentsService) {}
+  constructor(
+    private readonly agents: AgentsService,
+    private readonly roles: RolesService,
+  ) {}
 
   /** 员工视角：可见的已上架 Agent */
   @Get('agents')
@@ -82,7 +85,7 @@ export class AgentsController {
   async getSpec(@Req() req: { user: { role: string } }, @Param('id') id: string) {
     try {
       const view = await this.agents.getSpec(id)
-      if (view.dirty && !can(req.user.role as Role, 'agent.edit')) {
+      if (view.dirty && !this.roles.can(req.user.role, 'agent.edit')) {
         throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
       }
       return view

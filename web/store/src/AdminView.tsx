@@ -108,6 +108,7 @@ export default function AdminView({ state, act }: Props) {
           {<ScheduledSection state={state} />}
           <QuotaSection state={state} act={act} />
           <RbacSection state={state} act={act} />
+          <RolesSection state={state} act={act} />
           <ModelsSection state={state} />
         </>
       ) : null}
@@ -395,7 +396,7 @@ function UsersSection({ state, act, onDisable }: Props & { onDisable: (id: strin
                   <td><input value={edit.dept} style={{ minWidth: 100 }} onChange={(e) => act.editUser(u.id, { dept: e.target.value })} /></td>
                   <td>
                     <select value={edit.role} onChange={(e) => act.editUser(u.id, { role: e.target.value })}>
-                      {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {[...ROLES, ...state.roleDefs.map((r) => r.name)].map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
                   <td><Badge tone={permBadge(u.permissionMode)}>{u.permissionMode || '—'}</Badge></td>
@@ -550,6 +551,56 @@ function RbacSection({ state, act }: Props) {
         </select>
         <button onClick={() => void act.saveOverlay()}>设置部门覆盖</button>
         <button className="ghost" onClick={() => void act.clearOverlay()}>清除覆盖</button>
+      </div>
+    </section>
+  );
+}
+
+function RolesSection({ state, act }: Props) {
+  const f = state.roleForm;
+  const options = state.permKeys.length ? state.permKeys : [];
+  return (
+    <section className="section">
+      <h2 className="plain-head">角色 <span className="hint">自定义角色（权限点组合 + DSH 沙箱）</span></h2>
+      {state.roleDefs.length === 0 ? (
+        <Empty>无自定义角色（预置 employee/developer/admin）</Empty>
+      ) : (
+        <table>
+          <thead><tr><th>名称</th><th>权限</th><th>沙箱</th><th></th></tr></thead>
+          <tbody>
+            {state.roleDefs.map((r) => (
+              <tr key={r.name}>
+                <td className="mono">{r.name}</td>
+                <td className="mono">{r.permissions.join(', ') || '—'}</td>
+                <td className="mono">{r.dshPreset}</td>
+                <td><button className="danger small" onClick={() => void act.removeRole(r.name)}>删除</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', gap: 8 }}>
+        <input placeholder="角色名（如 report-viewer）" value={f.name} style={{ minWidth: 150 }} onChange={(e) => act.setRoleForm({ name: e.target.value })} />
+        <select value={f.dshPreset} onChange={(e) => act.setRoleForm({ dshPreset: e.target.value })}>
+          {(state.presetKeys.length ? state.presetKeys : []).map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button className="ok" onClick={() => void act.upsertRole()}>保存</button>
+      </div>
+      <div className="perms" style={{ marginTop: 8 }}>
+        {options.map((p) => (
+          <label key={p} className="row" style={{ gap: 4, marginRight: 10 }}>
+            <input
+              type="checkbox"
+              checked={f.permissions.includes(p)}
+              onChange={(e) =>
+                act.setRoleForm({
+                  permissions: e.target.checked ? [...f.permissions, p] : f.permissions.filter((x) => x !== p),
+                })
+              }
+            />
+            <span className="mono">{p}</span>
+          </label>
+        ))}
       </div>
     </section>
   );

@@ -89,6 +89,12 @@ export interface User {
   status: 'active' | 'disabled' | string;
 }
 
+export interface RoleDef {
+  name: string;
+  permissions: string[];
+  dshPreset: string;
+}
+
 export interface SessionRow {
   id: string;
   userId: string;
@@ -205,6 +211,8 @@ export interface AppState {
   users: User[];
   userEdits: Record<string, { dept: string; role: string }>;
   userFilter: string;
+  roleDefs: RoleDef[];
+  roleForm: { name: string; permissions: string[]; dshPreset: string };
   sessions: SessionRow[];
   sessUser: string;
   sessDept: string;
@@ -213,6 +221,8 @@ export interface AppState {
   sessionDetail: SessionDetail | null;
   instances: { count: number; instances: Instance[] } | null;
   rbac: { deptOverlays: Record<string, string> } | null;
+  permKeys: string[];
+  presetKeys: string[];
   models: ModelsBody | null;
   audit: AuditEvent[];
   auditUser: string;

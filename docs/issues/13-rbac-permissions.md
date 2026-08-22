@@ -38,3 +38,13 @@ spec §5 Phase 2「权限分级：普通员工（workspace-write + ask）/ 开�
 > 2026-08-21：**权限点全量落地 + DSH preset 对接**。`@RequirePermission` + 可注入 PermissionGuard（拒绝写 `authz.denied`）；JWT 每次请求刷新 live 角色。角色默认 `employee=workspace-write`、`developer/admin=danger-full-access`，经 `DSH_PERMISSION_MODE` 注入 Web 实例与 worker（base bundle / worker.cordis 已读该 env）。部门覆盖：`CP_DEPT_PERMISSION` + `PUT /api/admin/permissions/overlays`（内存，优先于角色）。改角色/部门会回收旧实例，新会话 pin 新 preset。自定义角色与 users 落 PG 仍未做。
 >
 > 2026-08-21（二）：**users 落 PG**。迁移 `007_users.sql`（id 改为 text、dept 名、role_override）。hydrate 时 PG 覆盖种子，缺行再回写；patch/upsert 双写。禁用与角色覆盖跨重启保留。自定义角色仍未做。
+
+> 2026-08-22：**自定义角色落地**（13 收尾）。
+> - 迁移 011：role_definitions（name 主键 + permissions jsonb + dsh_preset）
+> - RolesService（@Global，写入后刷新内存缓存）：`can(role, perm)` 预置角色走内置矩阵、自定义角色查权限点集合；`dshPresetOf` 取自定义 preset；upsert/remove 校验（预置角色不可编辑/删除、未知权限点/非法 preset 拒绝）
+> - PermissionGuard / PermissionPolicyService 接入 RolesService；UsersService `role` 放宽为 string，`patch` 支持指派自定义角色、拒绝未知角色名
+> - API：GET/POST/DELETE `/api/admin/roles`（user.manage）+ 审计 admin.role.upsert/remove；管理后台「角色」区（权限点勾选 + DSH preset）+ 用户角色下拉并入自定义角色
+> - 单测：RolesService 5 个（can/presetOf/upsert/remove）、permission.guard 自定义角色放行、users custom-role patch；控制面 90/90、web 18/18；真实 PG 冒烟通过
+> - 一致性修正：① 内联 `can()` 端点（tasks.cancel 的 task.view_all、agents.getSpec 的 agent.edit）改走 RolesService.can，自定义角色不再恒拒；② PermissionPolicyService.resolve 改为「部门 overlay 恒最高 → 自定义 preset → 内置默认」（修正自定义角色被短路绕过部门覆盖）；③ UsersService.adopt 对悬空（已删除）自定义角色名回退到部门推断
+> - 单测增至：permission-policy overlay 优先 + adopt 悬空回退；控制面 92/92、web 18/18
+> 遗留：组织架构定时同步（07）。

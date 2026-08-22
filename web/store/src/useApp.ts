@@ -40,6 +40,8 @@ const initial: AppState = {
   users: [],
   userEdits: {},
   userFilter: '',
+  roleDefs: [],
+  roleForm: { name: '', permissions: [], dshPreset: 'workspace-write' },
   sessions: [],
   sessUser: '',
   sessDept: '',
@@ -48,6 +50,8 @@ const initial: AppState = {
   sessionDetail: null,
   instances: null,
   rbac: null,
+  permKeys: [],
+  presetKeys: [],
   models: null,
   audit: [],
   auditUser: '',
@@ -96,6 +100,9 @@ export interface Actions {
   setScheduledStatus(id: string, status: 'pause' | 'resume'): Promise<void>;
   removeScheduled(id: string): Promise<void>;
   loadSchedRuns(id: string): Promise<void>;
+  setRoleForm(patch: Partial<AppState['roleForm']>): void;
+  upsertRole(): Promise<void>;
+  removeRole(name: string): Promise<void>;
   focusUser(id: string): void;
   editUser(id: string, patch: { dept?: string; role?: string }): void;
   saveUser(id: string): Promise<void>;
@@ -174,10 +181,11 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       })),
       fetchSessions({ userId: state.sessUser, dept: state.sessDept, from: localToIso(state.sessFrom) }),
       client.admin.instances().then((r) => setState((prev) => ({ ...prev, instances: r }))).catch(recordError('instances')),
-      client.admin.permissions().then((r) => setState((prev) => ({ ...prev, rbac: r }))).catch(recordError('rbac')),
+      client.admin.permissions().then((r) => setState((prev) => ({ ...prev, rbac: r, permKeys: Object.keys(r.matrix || {}), presetKeys: r.presets || [] }))).catch(recordError('rbac')),
       client.admin.models().then((r) => setState((prev) => ({ ...prev, models: r }))).catch(recordError('models')),
       client.admin.allScheduled().then((r) => setState((prev) => ({ ...prev, allSched: r.tasks || [] }))).catch(recordError('sched')),
       client.admin.scheduledRuns({ status: 'failed' }).then((r) => setState((prev) => ({ ...prev, schedFailRuns: r.runs || [] }))).catch(recordError('schedRuns')),
+      client.admin.roles().then((r) => setState((prev) => ({ ...prev, roleDefs: r.roles || [] }))).catch(recordError('roles')),
       fetchAudit({
         limit: '50',
         ...(state.auditUser ? { userId: state.auditUser } : {}),
@@ -470,6 +478,29 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('加载运行历史失败：' + (e as Error).message, true); }
   }
 
+  // ── 自定义角色（13）──────────────────────────────────
+  function setRoleForm(patch: Partial<AppState['roleForm']>) {
+    setState((prev) => ({ ...prev, roleForm: { ...prev.roleForm, ...patch } }));
+  }
+
+  async function upsertRole() {
+    try {
+      const f = state.roleForm;
+      if (!f.name) { notify('角色名必填', true); return; }
+      const r = await client.admin.upsertRole({ name: f.name, permissions: f.permissions, dshPreset: f.dshPreset });
+      setState((prev) => ({ ...prev, roleDefs: r.roles || [], roleForm: { name: '', permissions: [], dshPreset: 'workspace-write' } }));
+      notify('已保存角色');
+    } catch (e) { notify('保存失败：' + (e as Error).message, true); }
+  }
+
+  async function removeRole(name: string) {
+    try {
+      const r = await client.admin.removeRole(name);
+      setState((prev) => ({ ...prev, roleDefs: r.roles || [] }));
+      notify('已删除角色');
+    } catch (e) { notify('删除失败：' + (e as Error).message, true); }
+  }
+
   function focusUser(id: string) {
     update({ sessUser: id, sessDept: '', auditUser: id });
     fetchSessions({ userId: id, dept: '', from: undefined }).catch((e) => notify('检索失败：' + (e as Error).message, true));
@@ -597,7 +628,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, setRoleForm, upsertRole, removeRole, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

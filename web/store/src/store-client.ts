@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -37,6 +37,14 @@ export interface Client {
   submitTask(agentPresetId: string, task: string): Promise<TaskSubmitResult>;
   getTask(id: string): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
+
+  // ── 定时 Agent（20）用户侧 ──
+  listScheduled(): Promise<{ tasks: ScheduledTask[] }>;
+  createScheduled(body: { name: string; schedule: string; taskTemplate: string; agentPresetId?: string; timezone?: string }): Promise<{ task: ScheduledTask; notice: string }>;
+  runScheduled(id: string): Promise<{ ok: boolean; detail?: string }>;
+  setScheduledStatus(id: string, action: 'pause' | 'resume'): Promise<{ task: ScheduledTask; notice: string }>;
+  removeScheduled(id: string): Promise<{ ok: boolean }>;
+  scheduleRuns(id: string): Promise<{ runs: ScheduledRunLog[] }>;
 
   // ── Agent 编排（agent-orchestration-design.md §8）──
   capabilities(): Promise<CapabilityCatalog>;
@@ -70,6 +78,8 @@ export interface Client {
     setOverlay(dept: string, preset: string | null): Promise<unknown>;
     models(): Promise<ModelsBody>;
     auditEvents(query: Record<string, string>): Promise<{ events: AuditEvent[] }>;
+    allScheduled(): Promise<{ tasks: ScheduledTask[] }>;
+    scheduledRuns(query: Record<string, string>): Promise<{ runs: ScheduledRunLog[] }>;
   };
 }
 
@@ -136,6 +146,14 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
 
+    // 定时 Agent（20）用户侧
+    listScheduled: () => request<{ tasks: ScheduledTask[] }>('/scheduled-tasks'),
+    createScheduled: (body: { name: string; schedule: string; taskTemplate: string; agentPresetId?: string; timezone?: string }) => request<{ task: ScheduledTask; notice: string }>('/scheduled-tasks', { method: 'POST', body }),
+    runScheduled: (id: string) => request<{ ok: boolean; detail?: string }>(`/scheduled-tasks/${id}/run-now`, { method: 'POST', body: {} }),
+    setScheduledStatus: (id: string, action: 'pause' | 'resume') => request<{ task: ScheduledTask; notice: string }>(`/scheduled-tasks/${id}/${action}`, { method: 'POST', body: {} }),
+    removeScheduled: (id: string) => request<{ ok: boolean }>(`/scheduled-tasks/${id}`, { method: 'DELETE' }),
+    scheduleRuns: (id: string) => request<{ runs: ScheduledRunLog[] }>(`/scheduled-tasks/${id}/runs`),
+
     capabilities: () => request<CapabilityCatalog>('/capabilities'),
     getSpec: (id) => request<SpecView>(`/agents/${id}/spec`),
     putSpec: (id, spec, expectedUpdatedAt) => request<{ notice: string }>(`/agents/${id}/spec`, { method: 'PUT', body: { spec, expectedUpdatedAt } }),
@@ -167,6 +185,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       setOverlay: (dept, preset) => request('/admin/permissions/overlays', { method: 'PUT', body: { dept, preset } }),
       models: () => request<ModelsBody>('/admin/models'),
       auditEvents: (query) => request<{ events: AuditEvent[] }>('/admin/audit/events', { query }),
+      allScheduled: () => request<{ tasks: ScheduledTask[] }>('/admin/scheduled-tasks'),
+      scheduledRuns: (query) => request<{ runs: ScheduledRunLog[] }>('/admin/scheduled-runs', { query }),
     },
   };
 }

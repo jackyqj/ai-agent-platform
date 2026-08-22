@@ -11,6 +11,11 @@ export interface AuditRow {
   ts: string
 }
 
+/** 定时任务（scheduled_tasks）列投影：list/get 共享，避免重复 */
+const SCHED_TASK_COLS = `id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
+                  task_template AS "taskTemplate", status, timezone, last_run_at AS "lastRunAt",
+                  last_run_status AS "lastRunStatus", next_run_at AS "nextRunAt", created_at AS "createdAt"`
+
 export class PgStore {
   readonly pool: pg.Pool | null
 
@@ -631,47 +636,34 @@ export class PgStore {
     }
   }
 
-  // --- 20：定时 Agent（scheduled_tasks 表） ---
+  // --- 20：定时 Agent（scheduled_tasks 表 + scheduled_run_logs） ---
 
-  async insertScheduledTask(t: { id: string; ownerUserId: string; name: string; agentPresetId: string; schedule: string; taskTemplate: string; nextRunAt: string }): Promise<void> {
+  async insertScheduledTask(t: { id: string; ownerUserId: string; name: string; agentPresetId: string; schedule: string; taskTemplate: string; nextRunAt: string; timezone: string }): Promise<void> {
     await this.pool!.query(
-      `INSERT INTO scheduled_tasks (id, owner_user_id, name, agent_preset_id, schedule, task_template, next_run_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [t.id, t.ownerUserId, t.name, t.agentPresetId, t.schedule, t.taskTemplate, t.nextRunAt],
+      `INSERT INTO scheduled_tasks (id, owner_user_id, name, agent_preset_id, schedule, task_template, next_run_at, timezone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [t.id, t.ownerUserId, t.name, t.agentPresetId, t.schedule, t.taskTemplate, t.nextRunAt, t.timezone],
     )
   }
 
   async listScheduledTasks(ownerUserId?: string): Promise<Record<string, unknown>[]> {
     const res = ownerUserId
-      ? await this.pool!.query(
-          `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
-                  task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
-           FROM scheduled_tasks WHERE owner_user_id = $1 ORDER BY created_at DESC`,
-          [ownerUserId],
-        )
-      : await this.pool!.query(
-          `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
-                  task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
-           FROM scheduled_tasks ORDER BY created_at DESC`,
-        )
+      ? await this.pool!.query(`SELECT ${SCHED_TASK_COLS} FROM scheduled_tasks WHERE owner_user_id = $1 ORDER BY created_at DESC`, [ownerUserId])
+      : await this.pool!.query(`SELECT ${SCHED_TASK_COLS} FROM scheduled_tasks ORDER BY created_at DESC`)
     return res.rows
   }
 
   async getScheduledTask(id: string) {
-    const res = await this.pool!.query(
-      `SELECT id, owner_user_id AS "ownerUserId", name, agent_preset_id AS "agentPresetId", schedule,
-              task_template AS "taskTemplate", status, last_run_at AS "lastRunAt", next_run_at AS "nextRunAt", created_at AS "createdAt"
-       FROM scheduled_tasks WHERE id = $1`,
-      [id],
-    )
+    const res = await this.pool!.query(`SELECT ${SCHED_TASK_COLS} FROM scheduled_tasks WHERE id = $1`, [id])
     return res.rows[0] ?? undefined
   }
 
-  async updateScheduledTask(id: string, p: { status?: string; lastRunAt?: string; nextRunAt?: string }): Promise<void> {
+  async updateScheduledTask(id: string, p: { status?: string; lastRunAt?: string; lastRunStatus?: string; nextRunAt?: string }): Promise<void> {
     const sets: string[] = []
     const args: unknown[] = []
     if (p.status) { args.push(p.status); sets.push(`status = $${args.length}`) }
     if (p.lastRunAt) { args.push(p.lastRunAt); sets.push(`last_run_at = $${args.length}`) }
+    if (p.lastRunStatus) { args.push(p.lastRunStatus); sets.push(`last_run_status = $${args.length}`) }
     if (p.nextRunAt) { args.push(p.nextRunAt); sets.push(`next_run_at = $${args.length}`) }
     if (sets.length === 0) return
     args.push(id)
@@ -687,6 +679,33 @@ export class PgStore {
       `SELECT id, owner_user_id AS "ownerUserId", agent_preset_id AS "agentPresetId", task_template AS "taskTemplate"
        FROM scheduled_tasks WHERE status = 'active' AND next_run_at <= $1 ORDER BY next_run_at LIMIT 20`,
       [now],
+    )
+    return res.rows
+  }
+
+  // --- 20：定时运行日志（scheduled_run_logs，执行失败告警/任务历史） ---
+
+  async insertScheduledRunLog(scheduledId: string, taskId: string | undefined, status: string, error?: string): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO scheduled_run_logs (scheduled_id, task_id, status, error) VALUES ($1, $2, $3, $4)`,
+      [scheduledId, taskId ?? null, status, error ?? null],
+    )
+  }
+
+  async listScheduledRunLogs(f: { scheduledId?: string; status?: string; limit: number }): Promise<Record<string, unknown>[]> {
+    const where: string[] = []
+    const args: unknown[] = []
+    if (f.scheduledId) { args.push(f.scheduledId); where.push(`l.scheduled_id = $${args.length}`) }
+    if (f.status) { args.push(f.status); where.push(`l.status = $${args.length}`) }
+    args.push(f.limit)
+    const res = await this.pool!.query(
+      `SELECT l.id, l.scheduled_id AS "scheduledId", s.name AS "name", s.owner_user_id AS "ownerUserId",
+              l.task_id AS "taskId", l.status, l.error, l.run_at AS "runAt"
+       FROM scheduled_run_logs l
+       LEFT JOIN scheduled_tasks s ON s.id = l.scheduled_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY l.run_at DESC LIMIT $${args.length}`,
+      args,
     )
     return res.rows
   }

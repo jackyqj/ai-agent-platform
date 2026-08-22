@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { type Actions } from './useApp';
 import AgentComposeView from './AgentComposeView';
-import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge } from './ui';
+import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge, RunStatusBadge } from './ui';
 import { fmtTs, shortId } from './util';
 import type { AdminPane, AppState } from './types';
 
@@ -105,6 +105,7 @@ export default function AdminView({ state, act }: Props) {
       {pane === 'config' ? (
         <>
           <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} onRemove={(id, name) => setPending({ kind: 'delete', id, name })} />
+          {<ScheduledSection state={state} />}
           <QuotaSection state={state} act={act} />
           <RbacSection state={state} act={act} />
           <ModelsSection state={state} />
@@ -263,6 +264,50 @@ function StatsSection({ state }: { state: AppState }) {
       {s.recentErrors?.length ? (
         <div className="msg">{'最近失败：' + s.recentErrors.map((e) => e.id + ' ' + String(e.error || '').slice(0, 40)).join('；')}</div>
       ) : null}
+    </section>
+  );
+}
+
+function ScheduledSection({ state }: { state: AppState }) {
+  return (
+    <section className="section">
+      <h2 className="plain-head">定时任务</h2>
+      {state.allSched.length === 0 ? (
+        <Empty>无定时任务</Empty>
+      ) : (
+        <table>
+          <thead><tr><th>名称</th><th>owner</th><th>调度</th><th>时区</th><th>上次</th><th>最近状态</th></tr></thead>
+          <tbody>
+            {state.allSched.map((t) => (
+              <tr key={t.id}>
+                <td>{t.name}</td>
+                <td className="mono">{shortId(t.ownerUserId)}</td>
+                <td className="mono">{t.schedule}</td>
+                <td className="mono">{t.timezone || '—'}</td>
+                <td className="mono">{t.nextRunAt ? fmtTs(t.nextRunAt) : '—'}</td>
+                <td><RunStatusBadge status={t.lastRunStatus ?? t.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h2 className="plain-head" style={{ marginTop: 18 }}>执行失败 <span className="hint">{state.schedFailRuns.length + ' 条'}</span></h2>
+      {state.schedFailRuns.length === 0 ? (
+        <Empty>无失败</Empty>
+      ) : (
+        <table>
+          <thead><tr><th>任务</th><th>错误</th><th>时间</th></tr></thead>
+          <tbody>
+            {state.schedFailRuns.map((r) => (
+              <tr key={r.id}>
+                <td>{r.name || shortId(r.scheduledId, 6)}</td>
+                <td className="mono">{r.error || '—'}</td>
+                <td className="mono">{fmtTs(r.runAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

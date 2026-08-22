@@ -18,6 +18,11 @@ const initial: AppState = {
   agents: [],
   agentBusy: {},
   mySessions: [],
+  schedTasks: [],
+  schedRuns: [],
+  allSched: [],
+  schedFailRuns: [],
+  schedForm: { name: '', schedule: 'daily 09:00', template: '', tz: 'Asia/Shanghai' },
   chat: null,
   adminPane: 'workbench',
   showPropose: false,
@@ -84,6 +89,13 @@ export interface Actions {
   rollbackCompose(toVersion: number): Promise<void>;
   setQuota(): Promise<void>;
   resolveQuotaAlert(id: string): Promise<void>;
+  loadScheduled(): Promise<void>;
+  setSchedForm(patch: Partial<AppState['schedForm']>): void;
+  createScheduled(): Promise<void>;
+  runScheduled(id: string): Promise<void>;
+  setScheduledStatus(id: string, status: 'pause' | 'resume'): Promise<void>;
+  removeScheduled(id: string): Promise<void>;
+  loadSchedRuns(id: string): Promise<void>;
   focusUser(id: string): void;
   editUser(id: string, patch: { dept?: string; role?: string }): void;
   saveUser(id: string): Promise<void>;
@@ -118,14 +130,16 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, sessionsRes] = await Promise.all([
+      const [agentsRes, sessionsRes, schedRes] = await Promise.all([
         client.listAgents(),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
+        client.listScheduled().catch(() => ({ tasks: [] as AppState['schedTasks'] })),
       ]);
       setState((prev) => ({
         ...prev,
         agents: agentsRes.agents || [],
         mySessions: (sessionsRes.sessions || []).filter((s) => s.status !== 'closed'),
+        schedTasks: schedRes.tasks || [],
       }));
     } catch (e) {
       notify('加载商店失败：' + (e as Error).message, true);
@@ -162,6 +176,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       client.admin.instances().then((r) => setState((prev) => ({ ...prev, instances: r }))).catch(recordError('instances')),
       client.admin.permissions().then((r) => setState((prev) => ({ ...prev, rbac: r }))).catch(recordError('rbac')),
       client.admin.models().then((r) => setState((prev) => ({ ...prev, models: r }))).catch(recordError('models')),
+      client.admin.allScheduled().then((r) => setState((prev) => ({ ...prev, allSched: r.tasks || [] }))).catch(recordError('sched')),
+      client.admin.scheduledRuns({ status: 'failed' }).then((r) => setState((prev) => ({ ...prev, schedFailRuns: r.runs || [] }))).catch(recordError('schedRuns')),
       fetchAudit({
         limit: '50',
         ...(state.auditUser ? { userId: state.auditUser } : {}),
@@ -404,6 +420,56 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('处置告警失败：' + (e as Error).message, true); }
   }
 
+  // ── 定时 Agent（20）──────────────────────────────────
+  async function loadScheduled() {
+    const r = await client.listScheduled();
+    setState((prev) => ({ ...prev, schedTasks: r.tasks || [] }));
+  }
+
+  function setSchedForm(patch: Partial<AppState['schedForm']>) {
+    setState((prev) => ({ ...prev, schedForm: { ...prev.schedForm, ...patch } }));
+  }
+
+  async function createScheduled() {
+    try {
+      const f = state.schedForm;
+      await client.createScheduled({ name: f.name, schedule: f.schedule, taskTemplate: f.template, timezone: f.tz || undefined });
+      await loadScheduled();
+      notify('已创建定时任务');
+    } catch (e) { notify('创建失败：' + (e as Error).message, true); }
+  }
+
+  async function runScheduled(id: string) {
+    try {
+      const r = await client.runScheduled(id);
+      notify(r.detail || '已触发');
+      await loadScheduled();
+    } catch (e) { notify('触发失败：' + (e as Error).message, true); }
+  }
+
+  async function setScheduledStatus(id: string, status: 'pause' | 'resume') {
+    try {
+      const r = await client.setScheduledStatus(id, status);
+      notify(r.notice);
+      await loadScheduled();
+    } catch (e) { notify('操作失败：' + (e as Error).message, true); }
+  }
+
+  async function removeScheduled(id: string) {
+    try {
+      await client.removeScheduled(id);
+      notify('已删除');
+      await loadScheduled();
+    } catch (e) { notify('删除失败：' + (e as Error).message, true); }
+  }
+
+  async function loadSchedRuns(id: string) {
+    try {
+      const r = await client.scheduleRuns(id);
+      setState((prev) => ({ ...prev, schedRuns: r.runs || [] }));
+    } catch (e) { notify('加载运行历史失败：' + (e as Error).message, true); }
+  }
+
   function focusUser(id: string) {
     update({ sessUser: id, sessDept: '', auditUser: id });
     fetchSessions({ userId: id, dept: '', from: undefined }).catch((e) => notify('检索失败：' + (e as Error).message, true));
@@ -531,7 +597,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

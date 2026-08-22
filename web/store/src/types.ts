@@ -14,6 +14,34 @@ export interface ModelRoute {
   pinned?: boolean;
 }
 
+export type SchedRunStatus = 'fired' | 'awaiting' | 'failed';
+
+export interface ScheduledTask {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  agentPresetId: string;
+  schedule: string;
+  taskTemplate: string;
+  status: 'active' | 'paused' | string;
+  timezone?: string;
+  lastRunAt?: string;
+  lastRunStatus?: SchedRunStatus;
+  nextRunAt?: string;
+  createdAt: string;
+}
+
+export interface ScheduledRunLog {
+  id: string;
+  scheduledId: string;
+  name?: string;
+  ownerUserId?: string;
+  taskId?: string;
+  status: SchedRunStatus;
+  error?: string;
+  runAt: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -155,6 +183,11 @@ export interface AppState {
   agents: Agent[];
   agentBusy: Record<string, boolean>;
   mySessions: SessionRow[];
+  schedTasks: ScheduledTask[];
+  schedRuns: ScheduledRunLog[];
+  allSched: ScheduledTask[];
+  schedFailRuns: ScheduledRunLog[];
+  schedForm: { name: string; schedule: string; template: string; tz: string };
   chat: ChatState | null;
   adminPane: AdminPane;
   showPropose: boolean;

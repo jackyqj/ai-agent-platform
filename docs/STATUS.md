@@ -36,7 +36,7 @@
 | 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 + **warn 告警闭环**（quota_alerts 落库可处置 + 审计 quota.warn + 管理后台一键处置）+ **部门级策略**（submit 传 dept，user→dept→all 生效）+ **warn 放行/reject 拦截**（blocked 信号） | token/成本记账（等 03 网关） |
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |
 | 18 IM 机器人 | **✅ Stream 模式机器人实连 + 桥接全链路**：官方 SDK 长连接（真实凭证 connected=true）、@消息→身份解析→preset 路由→任务入队→受理回执→终态主动推送（sink 捕获实测）；敏感操作分层守卫（8/8 单测） | im/status 在线；simulate 路由/入队/回推全通 | 真实群 @ 验收（需把机器人拉进群）、worker 执行质量（等 Qwen 回归） |
-| 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测） | 时区/完整 cron/失败告警 |
+| 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测）+ **时区**（任务级 timezone）+ **完整 cron**（5 段 cron，cron-parser）+ **执行失败告警**（scheduled_run_logs + last_run_status + 审计 scheduled.failure + 管理面失败列表） | 与 18 IM 的结果推送联动（等真实群验收） |
 | 21 工作流模板 | ✅ 运行时装配（workflow/subagent 全套）+ 3 个模板库；管线通 | 完整端到端验证（等 Qwen 回归）；模板引用接线 |
 | 22 反馈闭环 | Phase 3 | 试点数据 |
 | 23 全量推广 | Phase 3 | 试点结果 + 培训材料 |

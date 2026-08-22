@@ -4,6 +4,14 @@ export function Badge({ tone, children }: { tone: string; children: ReactNode })
   return <span className={'badge ' + tone}>{children}</span>;
 }
 
+/** 定时任务最近一次运行状态徽标（fired/awaiting/failed），StoreView 与 AdminView 共用。 */
+export function RunStatusBadge({ status }: { status?: string }) {
+  if (status === 'failed') return <Badge tone="b-off">失败</Badge>;
+  if (status === 'fired') return <Badge tone="b-ok">已触发</Badge>;
+  if (status === 'awaiting') return <Badge tone="b-warn">待审批</Badge>;
+  return <Badge tone="b-dim">{status || '—'}</Badge>;
+}
+
 export function SectionHead({ idx, title, hint }: { idx: string; title: string; hint?: string }) {
   return (
     <div className="section-head">

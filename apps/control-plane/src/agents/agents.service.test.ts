@@ -137,3 +137,19 @@ test('propose/approve: 复制已发布 spec 为工作副本，approve 走 publis
   assert.equal(preset?.status, 'published')
   assert.equal(preset?.version, 2)
 })
+
+test('checkDrift: 磁盘 YAML 与最新修订一致则无漂移，不一致则报告', async () => {
+  const svc = makeService()
+  const files = (svc as unknown as { files: MemoryPresetFileStore }).files
+  await svc.publishSpec('hr-assistant', 1, 'u-admin') // 写文件 v2
+  assert.deepEqual(await svc.checkDrift(), [], '发布后无漂移')
+
+  // 模拟人手改 YAML / 写文件失败留下的半状态
+  const f = files.get('hr-assistant')!
+  files.files.set('hr-assistant', { ...f, cordisYaml: '# 人手改过的 agent.cordis.yml\n' })
+  const drifts = await svc.checkDrift()
+  assert.equal(drifts.length, 1)
+  assert.equal(drifts[0]!.id, 'hr-assistant')
+  assert.equal(drifts[0]!.drifted, true)
+  assert.match(drifts[0]!.reason ?? '', /不一致/)
+})

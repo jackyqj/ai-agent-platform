@@ -142,6 +142,15 @@ export class AgentsController {
     return { revisions: await this.agents.listRevisions(id) }
   }
 
+  /** 漂移告警：磁盘 YAML 与最新修订的对照结果（§13 P3） */
+  @Get('admin/agents/drift')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async drift() {
+    const drifts = await this.agents.checkDrift()
+    return { drifts, drifted: drifts.some((d) => d.drifted) }
+  }
+
   /** 回滚：把目标修订 spec 作为工作副本再 publish（新版本） */
   @Post('admin/agents/:id/rollback')
   @UseGuards(AuthGuard, PermissionGuard)

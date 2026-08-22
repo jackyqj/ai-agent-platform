@@ -258,6 +258,32 @@ export class AgentsService {
     return revs.slice().reverse().map((r) => ({ version: r.version, spec: r.spec, publishedBy: r.publishedBy, publishedAt: r.publishedAt }))
   }
 
+  /**
+   * 漂移告警（§10 末 / §13 P3）：对每个已发布 agent，用
+   * serialize(compile(latestRevision.spec)) 对照磁盘 YAML，不一致即漂移。
+   * 漂移来源：人手改 YAML（事故）、publish 写文件失败（PG 已提交但文件未落）。
+   */
+  async checkDrift(): Promise<Array<{ id: string; version: number; drifted: boolean; reason?: string }>> {
+    const agents = await this.list()
+    const drifts: Array<{ id: string; version: number; drifted: boolean; reason?: string }> = []
+    for (const a of agents) {
+      const revs = await this.listRevisions(a.id)
+      const latest = revs[0]
+      if (!latest) continue
+      const expected = this.composer.serialize(this.composer.compile(latest.spec))
+      const actual = await this.files.read(a.id)
+      if (actual !== expected) {
+        drifts.push({
+          id: a.id,
+          version: latest.version,
+          drifted: true,
+          reason: actual === undefined ? '磁盘缺 agent.cordis.yml' : '磁盘 YAML 与最新修订不一致',
+        })
+      }
+    }
+    return drifts
+  }
+
   /** 回滚 = 把目标修订的 spec 作为工作副本，再走一遍 publish（新版本，不改历史行）。 */
   async rollback(id: string, toVersion: number, byUserId: string): Promise<{ agent: AgentPreset; version: number }> {
     const rev = await this.getRevision(id, toVersion)

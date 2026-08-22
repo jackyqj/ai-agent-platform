@@ -2,7 +2,7 @@
 // 唯一碰磁盘的地方：把 serialize 产物原子写进 preset root/<id>/。
 // 生产 adapter 是磁盘（原子写），测试 adapter 是内存。
 
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** DI token（interface 不能作 token，用字符串常量） */
@@ -10,6 +10,8 @@ export const PRESET_FILE_STORE = 'PRESET_FILE_STORE' as const
 
 export interface PresetFileStore {
   write(id: string, cordisYaml: string, presetYaml: string): Promise<void>
+  /** 读磁盘上的 agent.cordis.yml（漂移对照用）；不存在返回 undefined。 */
+  read(id: string): Promise<string | undefined>
 }
 
 /** 同目录临时文件 + rename：rename 在同一文件系统内是原子的，避免半文件。 */
@@ -29,6 +31,10 @@ export class DiskPresetFileStore implements PresetFileStore {
     await atomicWrite(join(dir, 'agent.cordis.yml'), cordisYaml)
     await atomicWrite(join(dir, 'preset.yml'), presetYaml)
   }
+
+  async read(id: string): Promise<string | undefined> {
+    return readFile(join(this.root, id, 'agent.cordis.yml'), 'utf8').catch(() => undefined)
+  }
 }
 
 /** 内存 adapter：测试用，断言产物而不碰磁盘。 */
@@ -37,6 +43,10 @@ export class MemoryPresetFileStore implements PresetFileStore {
 
   async write(id: string, cordisYaml: string, presetYaml: string): Promise<void> {
     this.files.set(id, { cordisYaml, presetYaml })
+  }
+
+  async read(id: string): Promise<string | undefined> {
+    return this.files.get(id)?.cordisYaml
   }
 
   get(id: string): { cordisYaml: string; presetYaml: string } | undefined {

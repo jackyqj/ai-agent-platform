@@ -46,6 +46,10 @@ export interface Client {
   removeScheduled(id: string): Promise<{ ok: boolean }>;
   scheduleRuns(id: string): Promise<{ runs: ScheduledRunLog[] }>;
 
+  // ── 审批（14）用户侧 ──
+  myApprovals(): Promise<{ approvals: Approval[] }>;
+  cancelApproval(id: string): Promise<{ ok: boolean; notice?: string }>;
+
   // ── Agent 编排（agent-orchestration-design.md §8）──
   capabilities(): Promise<CapabilityCatalog>;
   getSpec(id: string): Promise<SpecView>;
@@ -157,6 +161,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     setScheduledStatus: (id: string, action: 'pause' | 'resume') => request<{ task: ScheduledTask; notice: string }>(`/scheduled-tasks/${id}/${action}`, { method: 'POST', body: {} }),
     removeScheduled: (id: string) => request<{ ok: boolean }>(`/scheduled-tasks/${id}`, { method: 'DELETE' }),
     scheduleRuns: (id: string) => request<{ runs: ScheduledRunLog[] }>(`/scheduled-tasks/${id}/runs`),
+    myApprovals: () => request<{ approvals: Approval[] }>('/approvals/mine'),
+    cancelApproval: (id: string) => request<{ ok: boolean; notice?: string }>(`/approvals/${id}/cancel`, { method: 'POST', body: {} }),
 
     capabilities: () => request<CapabilityCatalog>('/capabilities'),
     getSpec: (id) => request<SpecView>(`/agents/${id}/spec`),

@@ -13,6 +13,8 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
 
       <MySessions state={state} act={act} />
 
+      <MyApprovals state={state} act={act} />
+
       <ScheduledSection state={state} act={act} />
 
       <section className="section">
@@ -32,6 +34,28 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
 
 function agentName(state: AppState, presetId: string): string {
   return state.agents.find((a) => a.id === presetId)?.name ?? presetId;
+}
+
+function MyApprovals({ state, act }: { state: AppState; act: Actions }) {
+  const pend = state.myApprovals.filter((a) => a.status === 'pending');
+  if (pend.length === 0) return null;
+  return (
+    <section className="section">
+      <h2 className="plain-head">我发起的审批 <span className="hint">{pend.length + ' 条待审批'}</span></h2>
+      <table>
+        <thead><tr><th>操作</th><th>级别</th><th>动作</th></tr></thead>
+        <tbody>
+          {pend.map((a) => (
+            <tr key={a.id}>
+              <td>{a.action}</td>
+              <td className="mono">{a.chain && a.chain.length > 1 ? `${a.level} ${(a.currentLevel ?? 0) + 1}/${a.chain.length}` : a.level}</td>
+              <td><button className="danger small" onClick={() => void act.cancelApproval(a.id)}>撤销</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
 }
 
 function ScheduledSection({ state, act }: { state: AppState; act: Actions }) {

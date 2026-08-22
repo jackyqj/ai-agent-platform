@@ -497,6 +497,26 @@ export class PgStore {
     await this.pool!.query(`UPDATE approval_requests SET ${sets.join(', ')} WHERE id = $1`, args)
   }
 
+  /** 审批超时（14）：把「最近无进展（COALESCE(decided_at, created_at)）」超 TTL 小时的 pending 置为 cancelled；返回被过期行供审计 */
+  async expireOldApprovals(ttlHours: number): Promise<{ id: string; requesterUserId: string; agentPresetId: string }[]> {
+    const res = await this.pool!.query(
+      `UPDATE approval_requests SET status = 'cancelled', decided_at = now()
+       WHERE status = 'pending' AND COALESCE(decided_at, created_at) < now() - make_interval(hours => $1)
+       RETURNING id::text AS id, agent_preset_id AS "agentPresetId", requester_user_id AS "requesterUserId"`,
+      [ttlHours],
+    )
+    return res.rows
+  }
+
+  /** 用户撤销自己的 pending 审批（仅 pending → cancelled；否则 no-op） */
+  async cancelApproval(id: string): Promise<boolean> {
+    const res = await this.pool!.query(
+      `UPDATE approval_requests SET status = 'cancelled', decided_at = now() WHERE id = $1 AND status = 'pending'`,
+      [id],
+    )
+    return (res.rowCount ?? 0) > 0
+  }
+
   /** 授权存储：同一 requester+preset+action 在有效期内有 approved 记录（记住 X 小时） */
   async findActiveGrant(requesterUserId: string, agentPresetId: string, action: string): Promise<boolean> {
     const res = await this.pool!.query(

@@ -18,6 +18,7 @@ const initial: AppState = {
   agents: [],
   agentBusy: {},
   mySessions: [],
+  myApprovals: [],
   schedTasks: [],
   schedRuns: [],
   allSched: [],
@@ -100,6 +101,8 @@ export interface Actions {
   setScheduledStatus(id: string, status: 'pause' | 'resume'): Promise<void>;
   removeScheduled(id: string): Promise<void>;
   loadSchedRuns(id: string): Promise<void>;
+  loadMyApprovals(): Promise<void>;
+  cancelApproval(id: string): Promise<void>;
   setRoleForm(patch: Partial<AppState['roleForm']>): void;
   upsertRole(): Promise<void>;
   removeRole(name: string): Promise<void>;
@@ -138,16 +141,18 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, sessionsRes, schedRes] = await Promise.all([
+      const [agentsRes, sessionsRes, schedRes, approvalRes] = await Promise.all([
         client.listAgents(),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
         client.listScheduled().catch(() => ({ tasks: [] as AppState['schedTasks'] })),
+        client.myApprovals().catch(() => ({ approvals: [] as AppState['myApprovals'] })),
       ]);
       setState((prev) => ({
         ...prev,
         agents: agentsRes.agents || [],
         mySessions: (sessionsRes.sessions || []).filter((s) => s.status !== 'closed'),
         schedTasks: schedRes.tasks || [],
+        myApprovals: approvalRes.approvals || [],
       }));
     } catch (e) {
       notify('加载商店失败：' + (e as Error).message, true);
@@ -479,6 +484,21 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('加载运行历史失败：' + (e as Error).message, true); }
   }
 
+  async function loadMyApprovals() {
+    try {
+      const r = await client.myApprovals();
+      setState((prev) => ({ ...prev, myApprovals: r.approvals || [] }));
+    } catch (e) { notify('加载审批失败：' + (e as Error).message, true); }
+  }
+
+  async function cancelApproval(id: string) {
+    try {
+      await client.cancelApproval(id);
+      notify('已撤销');
+      await loadMyApprovals();
+    } catch (e) { notify('撤销失败：' + (e as Error).message, true); }
+  }
+
   // ── 自定义角色（13）──────────────────────────────────
   function setRoleForm(patch: Partial<AppState['roleForm']>) {
     setState((prev) => ({ ...prev, roleForm: { ...prev.roleForm, ...patch } }));
@@ -637,7 +657,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

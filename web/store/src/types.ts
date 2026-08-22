@@ -57,6 +57,7 @@ export interface Approval {
   requesterUserId: string;
   action: string;
   level: string;
+  status?: string;
   chain?: string[];
   currentLevel?: number;
 }
@@ -193,6 +194,7 @@ export interface AppState {
   agentBusy: Record<string, boolean>;
   mySessions: SessionRow[];
   schedTasks: ScheduledTask[];
+  myApprovals: Approval[];
   schedRuns: ScheduledRunLog[];
   allSched: ScheduledTask[];
   schedFailRuns: ScheduledRunLog[];

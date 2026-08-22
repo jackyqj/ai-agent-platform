@@ -43,3 +43,10 @@ spec §2.2 关键发现：DSH 原生审批（`dsh-user-approval`）是**一次�
 > - 配置：`PUT /api/admin/agents/:id/approval-chain`（agent.publish）+ 审计 admin.agent.approval_chain；**链角色须具 approval.decide 能力**（admin 或自定义角色授予该权限），否则配置端拒绝（防死链）；管理后台 Agent 行内「审批链」输入、待审批面板显示「层级 n/总数 → 当前需角色」
 > - 单测：ApprovalService 7/7（默认链/自定义链/单级入队/多级推进/角色不符/拒绝/self 授权命中）；控制面 99/99、web 18/18；真实 PG 冒烟通过
 > 遗留：与 DSH 原生 approval seam 的深层挂钩；审批超时/撤销；敏感工具/部门级「需审批」清单；一级审批改为「本人确认」。（注：非 admin 的链角色需先经 13 自定义角色授予 approval.decide。）
+
+> 2026-08-22（二）：**审批超时/撤销**（14 状态机补全）。
+> - 超时：ApprovalService 加定时清理（CP_APPROVAL_TTL_HOURS 默认 24h / CP_APPROVAL_SWEEP_MS 默认 60s），超时 pending → cancelled + 审计 approval.expired（fail-soft）
+> - 撤销：`POST /api/approvals/:id/cancel`（请求人撤销自己的 pending；非请求人/已终态拒绝）+ 审计 approval.cancelled
+> - 单测：sweepExpired / cancel（含非请求人、已终态不可撤销）；控制面 102/102、web 18/18；真实 PG 冒烟通过
+> - 复查修订：超时基准取「最近无进展」（COALESCE(decided_at, created_at)），多级长链有推进即不误杀；两个持久化分支统一（memory 也写 decidedAt）；approval.expired/cancelled 审计载荷在 PG/内存路径一致（均含 agentPresetId）；Web 区标题改为「我发起的审批」（数据方向是「我发起、待他人审批」）
+> 遗留：与 DSH 原生 approval seam 的深层挂钩；敏感工具/部门级「需审批」清单；一级审批改为「本人确认」；已批准授权的即时撤销。

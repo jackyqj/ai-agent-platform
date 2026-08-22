@@ -20,6 +20,15 @@ export class ApprovalsController {
     return { approvals: await this.approvals.listMine(req.user.sub) }
   }
 
+  /** 请求人撤销自己的 pending 审批 */
+  @Post('approvals/:id/cancel')
+  @UseGuards(AuthGuard)
+  async cancel(@Req() req: { user: { sub: string } }, @Param('id') id: string) {
+    const r = await this.approvals.cancel(id, req.user.sub)
+    if (!r.ok) throw new HttpException('审批不存在或不可撤销（仅请求人可撤销 pending）', HttpStatus.BAD_REQUEST)
+    return { ok: true, notice: '已撤销' }
+  }
+
   /** 待审批列表（admin/manager） */
   @Get('admin/approvals/pending')
   @UseGuards(AuthGuard, PermissionGuard)

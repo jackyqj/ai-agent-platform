@@ -1,8 +1,8 @@
-// 审批服务（14 工单）：授权存储 + 任务前置审批门 + 多级审批（有序审批链）
+// 审批服务（14 工单）：授权存储 + 任务前置审批门 + 多级审批（有序审批链）+ 审批超时/撤销
 // 语义：preset 的 approvalLevel = none → 免审批；self → 近期授权命中直接放行（记住 X 小时），否则建 pending；
 // manager → 按审批链逐个角色审批（默认 ['admin']，可从 agent_presets.approval_chain 配置为多级）。
-// 全链通过 → 关联任务入队。decide 校验当前层级审批人角色。
-import { Injectable, Logger } from '@nestjs/common'
+// 全链通过 → 关联任务入队。decide 校验当前层级审批人角色。超时自动撤销 + 请求人可撤销自己的 pending。
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { PgStore } from '../store/pg.store.js'
 import { AuditStore } from '../common/audit.store.js'
@@ -26,9 +26,10 @@ export interface ApprovalRequest {
 }
 
 @Injectable()
-export class ApprovalService {
+export class ApprovalService implements OnModuleInit, OnModuleDestroy {
   private logger = new Logger('Approvals')
   private memory = new Map<string, ApprovalRequest>()
+  private timer?: NodeJS.Timeout
 
   constructor(
     private readonly pg: PgStore,
@@ -36,12 +37,70 @@ export class ApprovalService {
     private readonly agents: AgentsService,
   ) {}
 
+  onModuleInit() {
+    this.timer = setInterval(() => this.sweepExpired().catch((e) => this.logger.error(`approval sweep failed: ${(e as Error).message}`)), this.sweepIntervalMs())
+    this.logger.log(`approval sweeper ready (ttl=${this.ttlHours()}h, every=${this.sweepIntervalMs()}ms)`)
+  }
+
+  onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer)
+  }
+
+  private ttlHours(): number {
+    return Number(process.env.CP_APPROVAL_TTL_HOURS ?? 24)
+  }
+
+  private sweepIntervalMs(): number {
+    return Number(process.env.CP_APPROVAL_SWEEP_MS ?? 60_000)
+  }
+
   private persist(): boolean {
     return this.pg.pool !== null
   }
 
   private grantHours(): number {
     return Number(process.env.CP_GRANT_HOURS ?? 24)
+  }
+
+  /** 超时清理：最近无进展（COALESCE(decided_at, created_at)）超过 TTL 的 pending 置为 cancelled，逐条审计 approval.expired。 */
+  async sweepExpired(): Promise<number> {
+    const ttl = this.ttlHours()
+    if (!this.persist()) {
+      const cutoff = Date.now() - ttl * 3600_000
+      let n = 0
+      for (const a of this.memory.values()) {
+        if (a.status !== 'pending') continue
+        const last = a.decidedAt ? new Date(a.decidedAt).getTime() : new Date(a.createdAt).getTime()
+        if (last >= cutoff) continue
+        a.status = 'cancelled'
+        a.decidedAt = new Date().toISOString()
+        n++
+        await this.audit.append({ userId: a.requesterUserId, eventType: 'approval.expired', payload: { approvalId: a.id, agentPresetId: a.agentPresetId } })
+      }
+      return n
+    }
+    const expired = await this.pg.expireOldApprovals(ttl).catch((e) => {
+      this.logger.error(`expireOldApprovals failed: ${(e as Error).message}`)
+      return [] as { id: string; requesterUserId: string; agentPresetId: string }[]
+    })
+    for (const r of expired) {
+      await this.audit.append({ userId: r.requesterUserId, eventType: 'approval.expired', payload: { approvalId: r.id, agentPresetId: r.agentPresetId } })
+    }
+    return expired.length
+  }
+
+  /** 请求人撤销自己的 pending 审批；返回是否真的撤销（非 pending/不存在则 false）。 */
+  async cancel(id: string, requesterUserId: string): Promise<{ ok: boolean }> {
+    const a = await this.get(id)
+    if (!a || a.requesterUserId !== requesterUserId || a.status !== 'pending') return { ok: false }
+    if (this.persist()) {
+      if (!(await this.pg.cancelApproval(id))) return { ok: false }
+    } else {
+      a.status = 'cancelled'
+      a.decidedAt = new Date().toISOString()
+    }
+    await this.audit.append({ userId: requesterUserId, eventType: 'approval.cancelled', payload: { approvalId: id, agentPresetId: a.agentPresetId } })
+    return { ok: true }
   }
 
   private defaultChain(): string[] {

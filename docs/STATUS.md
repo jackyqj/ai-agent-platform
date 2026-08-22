@@ -14,7 +14,7 @@
 | 07 SSO 网关 | 平台 JWT/角色守卫/API Key 服务身份；**钉钉 OAuth 原生接入真验**（授权 URL 302 / CSRF state 校验 / 换票端点直连，错误透传"不合法的临时授权码"） | employee→admin 403；key 签发/撤销/scope 全验；SSO 302→钉钉；callback 401 干净 | 浏览器真授权（需配置回调域名）、组织架构同步 |
 | 08 共享会话存储 | 控制面元数据落 PG + DSH SessionPersistence PG Provider | 重启恢复；事件链入 PG；**71/71 测试 + 覆盖率 100%** | 跨实例续聊验收；doc-sync 等上游门禁 |
 | 12 Agent 商店 | 4 个真实 preset + 目录服务（PG）+ 提审流程 + 静态 UI | dsh-agent-presets 发现全过；draft→批准→文件生成→上架 | 前端商店 UI 已出静态版（无构建）；配额档（16） |
-| 14 审批流 | 授权存储 + 任务前置审批门 + **多级审批**（有序审批链：角色逐级批，全链通过才入队；decide 校验当前层级角色；链角色须具 approval.decide，配置端防死链；agent 级审批链可经 admin 配置） | 触发→pending→逐级批准→入队；授权存储命中 | DSH 原生 seam 深层挂钩；审批超时/撤销；敏感工具/部门级「需审批」清单；一级审批改「本人确认」 |
+| 14 审批流 | 授权存储 + 任务前置审批门 + **多级审批**（有序审批链：角色逐级批，全链通过才入队；decide 校验当前层级角色；链角色须具 approval.decide，配置端防死链）+ **审批超时/撤销**（TTL 定时清理 approval.expired；请求人撤销自己的 pending） | 触发→pending→逐级批准→入队；授权存储命中；超时自动撤销；请求人可撤销 | DSH 原生 seam 深层挂钩；敏感工具/部门级「需审批」清单；一级审批改「本人确认」 |
 | 19 任务队列 | BullMQ + Worker（TS SDK 驱动运行时）+ 可靠性五件套 | 触发→执行→done；重试 3/3/超时/取消/串行/孤儿全验 | 步骤级轨迹（用户已决定不补）、IM/回调 |
 | 09 集中凭据 | PG AES-256-GCM vault + admin API + bootstrap + `dsh-credentials-pg`（PG 或 HTTP resolve）+ 每次 resolve 审计 | 单测：vault 优先/轮换/describe 无明文；HTTP 不持主密钥；resolve 审计无明文 | 容器 DNS（`host.containers.internal`）；worker 直连 PG 的 resolve 不经控制面；网关密钥等 03 |
 | 10 管理后台 v1 | 静态管理页 + 用户启用/禁用（立即回收实例、JWT 拒绝）+ 管理员会话检索/事件摘要 + 实例回收 + 只读模型配置 + 审计查询 | 单测：disable/patch、admin list 无 routing_secret、closeAll 回收实例、sessionId 审计过滤 | 网关未部署故模型配置只读；未做 React 门户 |

@@ -17,6 +17,8 @@ function makeSvc(agents: Record<string, unknown>, overrides: Record<string, unkn
     getApproval: async (id: string) => store.get(id),
     updateApproval: async (id: string, p: Record<string, unknown>) => { const r = store.get(id); if (r) Object.assign(r, p, { decidedAt: new Date().toISOString() }) },
     listApprovals: async () => [...store.values()],
+    expireOldApprovals: async () => [],
+    cancelApproval: async () => true,
     ...overrides,
   } as unknown as PgStore
   const events: Record<string, unknown>[] = []
@@ -91,4 +93,36 @@ test('gateTask：self 无授权 → pending；授权命中 → granted', async (
   const { svc, store } = makeSvc({ get: async () => selfAgent }, { findActiveGrant: async () => true })
   const r = await svc.gateTask('u-1', 'assistant', 'hello', 'task-1')
   assert.equal(r.granted, true, '自授权命中直接放行')
+})
+
+test('sweepExpired：过期 pending → cancelled + 审计 approval.expired（带 agentPresetId）', async () => {
+  const { svc, events } = makeSvc({ get: async () => managerAgent }, {
+    expireOldApprovals: async () => [{ id: 'a-expired', requesterUserId: 'u-1', agentPresetId: 'report-builder' }],
+  })
+  const n = await svc.sweepExpired()
+  assert.equal(n, 1)
+  const ev = events.find((e) => e.eventType === 'approval.expired') as { payload: { approvalId: string; agentPresetId: string } }
+  assert.ok(ev)
+  assert.equal(ev.payload.approvalId, 'a-expired')
+  assert.equal(ev.payload.agentPresetId, 'report-builder', '审计载荷应含 agentPresetId')
+})
+
+test('cancel：请求人撤销自己 pending → ok + 审计 approval.cancelled', async () => {
+  const { svc, events, store } = makeSvc({ get: async () => managerAgent })
+  await svc.gateTask('u-1', 'report-builder', '出报表', 'task-1')
+  const id = [...store.keys()][0]
+  const r = await svc.cancel(id, 'u-1')
+  assert.equal(r.ok, true)
+  assert.ok(events.some((e) => e.eventType === 'approval.cancelled'))
+})
+
+test('cancel：非请求人 / 非 pending → ok=false', async () => {
+  const { svc, store } = makeSvc({ get: async () => managerAgent })
+  await svc.gateTask('u-1', 'report-builder', '出报表', 'task-1')
+  const id = [...store.keys()][0]
+  assert.equal((await svc.cancel(id, 'u-other')).ok, false, '非请求人不撤销')
+  // 批准后不可撤销
+  const approved = await svc.decide(id, true, 'u-admin', 'admin', async () => {})
+  assert.equal(approved?.status, 'approved')
+  assert.equal((await svc.cancel(id, 'u-1')).ok, false, '已批准不可撤销')
 })

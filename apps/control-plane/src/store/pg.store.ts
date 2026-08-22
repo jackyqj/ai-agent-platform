@@ -282,7 +282,7 @@ export class PgStore {
   }): Promise<void> {
     await this.pool!.query(
       `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 1)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
        ON CONFLICT (id) DO NOTHING`,
       [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status],
     )
@@ -336,6 +336,20 @@ export class PgStore {
       [id],
     )
     return res.rows[0] ?? undefined
+  }
+
+  /**
+   * 种子 spec 写入 composition（§11.1）：仅当该行当前无 composition 且无任何已发布修订时写入，
+   * 不覆盖已有工作副本、不回写已发布的 agent。（幂等：种子只补一次。）
+   */
+  async ensureSeedComposition(id: string, spec: unknown): Promise<void> {
+    await this.pool!.query(
+      `UPDATE agent_presets SET composition = $2, updated_at = now()
+       WHERE id = $1
+         AND composition IS NULL
+         AND NOT EXISTS (SELECT 1 FROM agent_preset_revisions r WHERE r.preset_id = $1)`,
+      [id, JSON.stringify(spec)],
+    )
   }
 
   async listAgentRevisions(id: string): Promise<Record<string, unknown>[]> {
@@ -395,7 +409,8 @@ export class PgStore {
       await client.query(
         `UPDATE agent_presets SET version = $2, status = 'published',
                 name = $3, description = $4, visibility = $5, model_route = $6, approval_level = $7,
-                updated_by = $8, updated_at = now()
+                updated_by = $8, updated_at = now(),
+                composition = NULL  -- 发布后工作副本已与最新修订一致，清掉避免 dirty 永真（§7）
          WHERE id = $1`,
         [p.id, next, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.publishedBy],
       )

@@ -5,6 +5,7 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { PgStore } from '../store/pg.store.js'
 import { AgentComposer } from './composer.js'
 import { PRESET_FILE_STORE, type PresetFileStore } from './preset-file-store.js'
+import { AuditStore } from '../common/audit.store.js'
 import type { AgentSpec, CapabilityCatalog, ValidationResult } from './types.js'
 
 export interface AgentPreset {
@@ -30,6 +31,13 @@ export interface SpecView {
 export class SpecValidationError extends Error {
   constructor(readonly result: ValidationResult) {
     super('spec validation failed')
+  }
+}
+
+/** §8：propose 的模板没有已发布 spec（从未 publish）时抛此异常 → 控制器返 422。 */
+export class TemplateHasNoSpecError extends Error {
+  constructor(readonly agentId: string) {
+    super(`模板 agent ${agentId} 没有已发布 spec，无法复制；请先发布模板`)
   }
 }
 
@@ -86,6 +94,7 @@ export class AgentsService implements OnModuleInit {
   constructor(
     private readonly pg: PgStore,
     private readonly composer: AgentComposer,
+    private readonly audit: AuditStore,
     @Inject(PRESET_FILE_STORE) private readonly files: PresetFileStore,
   ) {
     this.seed('assistant', '通用助手', '日常问答、文档起草、信息整理（试点底座）', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
@@ -98,7 +107,7 @@ export class AgentsService implements OnModuleInit {
     id: string, name: string, description: string, visibility: AgentPreset['visibility'],
     modelRoute: AgentPreset['modelRoute'], approvalLevel: AgentPreset['approvalLevel'],
   ) {
-    this.memory.set(id, { id, name, description, visibility, modelRoute, approvalLevel, status: 'published', version: 1 })
+    this.memory.set(id, { id, name, description, visibility, modelRoute, approvalLevel, status: 'published', version: 0 })
   }
 
   private async persist(): Promise<boolean> {
@@ -114,6 +123,11 @@ export class AgentsService implements OnModuleInit {
     if (!(await this.persist())) return
     for (const p of this.memory.values()) {
       await this.pg.insertAgentPresetIfMissing(p).catch((e) => this.logger.error(`seed ${p.id} failed: ${(e as Error).message}`))
+    }
+    // §11.1：种子 spec（含 persona/mcp）写入 composition，作为真实工作副本；
+    // 已有 composition 或已发布修订的 agent 不动（不覆盖已发布产物）。
+    for (const s of SEED_SPECS) {
+      await this.pg.ensureSeedComposition(s.id, s).catch((e) => this.logger.error(`seed composition ${s.id} failed: ${(e as Error).message}`))
     }
   }
 
@@ -254,6 +268,9 @@ export class AgentsService implements OnModuleInit {
         })
       : this.memoryPublish(id, spec, yaml, meta, publishedBy, expectedVersion)
 
+    // §10 步骤 4：PG commit 后落审计 compose_publish。fail-soft：审计失败不阻断发布。
+    await this.audit.append({ eventType: 'compose_publish', userId: publishedBy, payload: { id, version: nextVersion } })
+
     // commit 之后原子写文件；写失败靠 P3 漂移告警兜底（PG 已提交但文件未落）。
     await this.files.write(id, yaml, meta)
     const agent = await this.get(id)
@@ -331,6 +348,7 @@ export class AgentsService implements OnModuleInit {
     preset.modelRoute = spec.modelRoute
     preset.approvalLevel = spec.approvalLevel
     preset.status = 'published'
+    this.memoryComposition.delete(id)  // 发布后工作副本已与最新修订一致，清掉避免 dirty 永真（§7）
     return next
   }
 
@@ -342,8 +360,11 @@ export class AgentsService implements OnModuleInit {
     if (existing) throw new Error(`agent ${input.id} 已存在`)
     const template = await this.get(input.basedOn)
     if (!template) throw new Error(`模板 agent ${input.basedOn} 不存在`)
-    // 从模板的已发布 spec 复制完整工作副本（§8：不再只复制目录元数据）
-    const baseSpec = await this.currentSpec(input.basedOn)
+    // §8：从模板的「已发布」spec 复制工作副本（不是目录元数据，也不是未发布草稿）。
+    // 模板从未 publish（无任何修订）→ 无已发布 spec → 422。
+    const revs = await this.listRevisions(input.basedOn)
+    if (revs.length === 0) throw new TemplateHasNoSpecError(input.basedOn)
+    const baseSpec = revs[0]!.spec
     const draftSpec: AgentSpec = { ...baseSpec, id: input.id, name: input.name, description: input.description }
     const draft: AgentPreset = {
       id: input.id, name: input.name, description: input.description,

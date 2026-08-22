@@ -4,7 +4,7 @@ import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
 import { can, type Role } from '../common/permissions.js'
-import { AgentsService, SpecValidationError } from './agents.service.js'
+import { AgentsService, SpecValidationError, TemplateHasNoSpecError, type AgentPreset } from './agents.service.js'
 import type { AgentSpec } from './types.js'
 
 @Controller()
@@ -101,8 +101,9 @@ export class AgentsController {
     @Param('id') id: string,
     @Body() body: { expectedVersion?: number },
   ) {
+    let current: AgentPreset | undefined
     try {
-      const current = await this.agents.get(id)
+      current = await this.agents.get(id)
       if (!current) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
       const r = await this.agents.publishSpec(id, body.expectedVersion ?? current.version, req.user.sub)
       return { agent: r.agent, version: r.version, notice: '已发布' }
@@ -110,7 +111,12 @@ export class AgentsController {
       if (e instanceof SpecValidationError) {
         throw new HttpException({ errors: e.result.ok === false ? e.result.errors : [] }, HttpStatus.UNPROCESSABLE_ENTITY)
       }
-      throw new HttpException((e as Error).message, HttpStatus.CONFLICT)
+      // 乐观并发冲突（expectedVersion 过期）才返 409；
+      // 其余（含 PG 已 commit 后文件写失败）是服务端故障，返 500（漂移由 P3 告警兜底）。
+      if (e instanceof Error && /version conflict/.test(e.message)) {
+        throw new HttpException((e as Error).message, HttpStatus.CONFLICT)
+      }
+      throw new HttpException((e as Error).message, HttpStatus.INTERNAL_SERVER_ERROR)
     }
   }
 
@@ -180,6 +186,9 @@ export class AgentsController {
       )
       return { agent: a, notice: '已提交提审，等待管理员批准' }
     } catch (e) {
+      if (e instanceof TemplateHasNoSpecError) {
+        throw new HttpException((e as Error).message, HttpStatus.UNPROCESSABLE_ENTITY)
+      }
       throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
     }
   }

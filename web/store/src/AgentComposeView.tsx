@@ -1,7 +1,7 @@
 import { type Actions } from './useApp';
 import { Badge, Empty } from './ui';
 import { fmtTs } from './util';
-import type { AppState, ComposeState } from './types';
+import type { AppState, CapabilityCatalog, ComposeState } from './types';
 
 // 三栏编排编辑器（agent-orchestration-design.md §9）：
 // 左栏能力目录（只读）、中栏编排表单、右栏 YAML 只读预览 + 校验错误。
@@ -88,6 +88,11 @@ const ROLES = ['employee', 'developer', 'admin'];
 const APPROVAL = ['none', 'self', 'manager'] as const;
 
 function SpecForm({ spec, act, cat }: { spec: NonNullable<ComposeState['spec']>; act: Actions; cat: ComposeState['catalog'] }) {
+  // 当前 modelRoute 在目录中的下标；不在目录（旧值）时回退 ''（显示占位）。
+  const indexOfModel = (models: CapabilityCatalog['models'], mr: { provider: string; model: string }) => {
+    const i = models.findIndex((m) => m.provider === mr.provider && m.model === mr.model)
+    return i >= 0 ? String(i) : ''
+  }
   const toggleMcp = (serverName: string) => {
     const has = spec.mcp.includes(serverName);
     act.editComposeSpec({ mcp: has ? spec.mcp.filter((m) => m !== serverName) : [...spec.mcp, serverName] });
@@ -111,14 +116,17 @@ function SpecForm({ spec, act, cat }: { spec: NonNullable<ComposeState['spec']>;
 
       <label>模型路由</label>
       <select
-        value={spec.modelRoute.provider + '/' + spec.modelRoute.model}
+        value={indexOfModel(cat?.models ?? [], spec.modelRoute)}
         onChange={(e) => {
-          const [provider, model] = e.target.value.split('/');
-          act.editComposeSpec({ modelRoute: { provider, model, pinned: spec.modelRoute.pinned } });
+          // model 名本身可含 '/'（如 deepseek-ai/deepseek-v4-flash-0731），不能用 split('/') 重建，
+          // 改按目录数组下标取值，避免任何截断。
+          const i = Number(e.target.value)
+          const m = (cat?.models ?? [])[i]
+          if (m) act.editComposeSpec({ modelRoute: { provider: m.provider, model: m.model, pinned: spec.modelRoute.pinned } })
         }}
       >
-        {(cat?.models ?? []).map((m) => (
-          <option key={m.provider + m.model} value={m.provider + '/' + m.model}>{m.label}</option>
+        {(cat?.models ?? []).map((m, i) => (
+          <option key={m.provider + m.model} value={String(i)}>{m.label}</option>
         ))}
       </select>
       <label className="row" style={{ gap: 6 }}>

@@ -72,9 +72,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     } else {
       this.memory.set(record.id, record)
     }
-    // 配额门（16）：超限 reject → 抛错拒绝；warn → 放行记日志
-    const quota = await this.quota.checkAndRecord(userId, undefined)
-    if (!quota.allowed) {
+    // 配额门（16）：reject 超限 → 抛错拒绝；warn 超限 → 放行（已落可处置告警）。
+    // 传用户部门让 dept 级策略（user→dept→all）能被命中。
+    const quota = await this.quota.checkAndRecord(userId, user?.dept)
+    if (quota.blocked) {
       throw new Error(`配额已用尽：${quota.used}/${quota.budget}（${quota.policy!.period}）`)
     }
     const gate = await this.approvals.gateTask(userId, agentPresetId, taskText, record.id)

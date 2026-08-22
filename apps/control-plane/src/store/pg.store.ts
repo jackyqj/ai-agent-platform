@@ -534,6 +534,57 @@ export class PgStore {
     )
   }
 
+  // --- 16：配额告警闭环（quota_alerts 表，warn 超限落可处置告警） ---
+
+  async insertQuotaAlert(a: {
+    policyId: string; userId?: string; scopeType: string; scopeId?: string
+    period: string; budgetRequests: number; usedRequests: number; message: string
+  }): Promise<boolean> {
+    const res = await this.pool!.query(
+      `INSERT INTO quota_alerts (policy_id, user_id, scope_type, scope_id, period, budget_requests, used_requests, message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (policy_id, period, user_id) WHERE resolved_at IS NULL DO NOTHING`,
+      [a.policyId, a.userId ?? null, a.scopeType, a.scopeId ?? null, a.period, a.budgetRequests, a.usedRequests, a.message],
+    )
+    return (res.rowCount ?? 0) > 0
+  }
+
+  async listQuotaAlerts(f: { openOnly?: boolean; limit: number }): Promise<Record<string, unknown>[]> {
+    const res = await this.pool!.query(
+      `SELECT id, policy_id AS "policyId", user_id AS "userId", scope_type AS "scopeType", scope_id AS "scopeId",
+              period, budget_requests AS "budgetRequests", used_requests AS "usedRequests", message,
+              resolved_at AS "resolvedAt", created_at AS "createdAt"
+       FROM quota_alerts ${f.openOnly ? 'WHERE resolved_at IS NULL' : ''}
+       ORDER BY created_at DESC LIMIT $1`,
+      [f.limit],
+    )
+    return res.rows
+  }
+
+  /** 同一策略+周期下是否已有未处置告警（去重，避免 warn 每次调用都刷一条） */
+  async hasOpenQuotaAlert(policyId: string, period: string, userId: string | undefined): Promise<boolean> {
+    const res = await this.pool!.query(
+      `SELECT 1 FROM quota_alerts
+       WHERE policy_id = $1 AND period = $2 AND resolved_at IS NULL AND user_id IS NOT DISTINCT FROM $3
+       LIMIT 1`,
+      [policyId, period, userId ?? null],
+    )
+    return res.rows.length > 0
+  }
+
+  async resolveQuotaAlert(id: string): Promise<boolean> {
+    const res = await this.pool!.query(
+      `UPDATE quota_alerts SET resolved_at = now() WHERE id = $1 AND resolved_at IS NULL`,
+      [id],
+    )
+    return (res.rowCount ?? 0) > 0
+  }
+
+  async countOpenQuotaAlerts(): Promise<number> {
+    const res = await this.pool!.query(`SELECT count(*) AS c FROM quota_alerts WHERE resolved_at IS NULL`)
+    return Number(res.rows[0]?.c ?? 0)
+  }
+
   // --- 15：用量/审计聚合 ---
 
   async usageStats(): Promise<Record<string, unknown>> {
@@ -562,6 +613,7 @@ export class PgStore {
            AND u.period_start = CURRENT_DATE`,
       ),
     ])
+    const openAlerts = await this.countOpenQuotaAlerts()
     return {
       tasksByDay: byDay.rows,
       tasksByStatus: byStatus.rows,
@@ -569,10 +621,12 @@ export class PgStore {
       approvals: approvals.rows,
       recentErrors: recentErrors.rows,
       quotaToday: quota.rows,
+      quotaOpenAlerts: openAlerts,
       totals: {
         tasks: byStatus.rows.reduce((a: number, r: { total: string }) => a + Number(r.total), 0),
         failed: byStatus.rows.find((r: { status: string }) => r.status === 'failed')?.total ?? 0,
         pendingApprovals: approvals.rows.find((r: { status: string }) => r.status === 'pending')?.total ?? 0,
+        quotaOpenAlerts: openAlerts,
       },
     }
   }

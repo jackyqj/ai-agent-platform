@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaPolicy, Revision, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -53,6 +53,8 @@ export interface Client {
     statsUsage(): Promise<{ stats: StatsBody }>;
     quotaPolicies(): Promise<{ policies: QuotaPolicy[] }>;
     setQuotaPolicy(policy: { scopeType: string; scopeId?: string; period: string; budgetRequests: number }): Promise<unknown>;
+    quotaAlerts(): Promise<{ alerts: QuotaAlert[] }>;
+    resolveQuotaAlert(id: string): Promise<{ ok: boolean; alerts: QuotaAlert[] }>;
     allAgents(): Promise<{ agents: Agent[] }>;
     createAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
     removeAgent(id: string): Promise<{ notice: string }>;
@@ -148,6 +150,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       statsUsage: () => request<{ stats: StatsBody }>('/admin/stats/usage'),
       quotaPolicies: () => request<{ policies: QuotaPolicy[] }>('/admin/quota/policies'),
       setQuotaPolicy: (policy) => request('/admin/quota/policies', { method: 'POST', body: policy }),
+      quotaAlerts: () => request<{ alerts: QuotaAlert[] }>('/admin/quota/alerts'),
+      resolveQuotaAlert: (id) => request<{ ok: boolean; alerts: QuotaAlert[] }>('/admin/quota/alerts/' + id + '/resolve', { method: 'POST', body: {} }),
       allAgents: () => request<{ agents: Agent[] }>('/admin/agents'),
       createAgent: (body) => request<{ agent: Agent; notice: string }>('/admin/agents', { method: 'POST', body }),
       removeAgent: (id) => request<{ notice: string }>(`/admin/agents/${id}`, { method: 'DELETE' }),

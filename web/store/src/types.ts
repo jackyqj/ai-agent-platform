@@ -38,6 +38,20 @@ export interface QuotaPolicy {
   overPolicy: string;
 }
 
+export interface QuotaAlert {
+  id: string;
+  policyId?: string;
+  userId?: string;
+  scopeType: string;
+  scopeId?: string;
+  period: string;
+  budgetRequests: number;
+  usedRequests: number;
+  message: string;
+  resolvedAt?: string | null;
+  createdAt: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -78,6 +92,7 @@ export interface StatsTotals {
   tasks: number;
   failed: number;
   pendingApprovals: number;
+  quotaOpenAlerts?: number;
 }
 
 export interface StatsBody {
@@ -153,6 +168,7 @@ export interface AppState {
   allAgents: Agent[];
   stats: { stats: StatsBody } | null;
   quotas: QuotaPolicy[];
+  quotaAlerts: QuotaAlert[];
   users: User[];
   userEdits: Record<string, { dept: string; role: string }>;
   userFilter: string;
@@ -170,7 +186,7 @@ export interface AppState {
   auditSession: string;
   auditType: string;
 
-  qScope: 'all' | 'user';
+  qScope: 'all' | 'user' | 'dept';
   qScopeId: string;
   qBudget: string;
   ovDept: string;

@@ -31,6 +31,7 @@ const initial: AppState = {
   allAgents: [],
   stats: null,
   quotas: [],
+  quotaAlerts: [],
   users: [],
   userEdits: {},
   userFilter: '',
@@ -82,6 +83,7 @@ export interface Actions {
   publishCompose(): Promise<void>;
   rollbackCompose(toVersion: number): Promise<void>;
   setQuota(): Promise<void>;
+  resolveQuotaAlert(id: string): Promise<void>;
   focusUser(id: string): void;
   editUser(id: string, patch: { dept?: string; role?: string }): void;
   saveUser(id: string): Promise<void>;
@@ -150,6 +152,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       client.admin.allAgents().then((r) => setState((prev) => ({ ...prev, allAgents: r.agents || [] }))),
       client.admin.statsUsage().then((r) => setState((prev) => ({ ...prev, stats: r }))).catch(recordError('stats')),
       client.admin.quotaPolicies().then((r) => setState((prev) => ({ ...prev, quotas: r.policies || [] }))),
+      client.admin.quotaAlerts().then((r) => setState((prev) => ({ ...prev, quotaAlerts: r.alerts || [] }))),
       client.admin.users().then((r) => setState((prev) => {
         const userEdits = { ...prev.userEdits };
         for (const u of r.users || []) if (!userEdits[u.id]) userEdits[u.id] = { dept: u.dept || '', role: u.role };
@@ -393,6 +396,14 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('设置配额失败：' + (e as Error).message, true); }
   }
 
+  async function resolveQuotaAlert(id: string) {
+    try {
+      const r = await client.admin.resolveQuotaAlert(id);
+      setState((prev) => ({ ...prev, quotaAlerts: r.alerts || [] }));
+      notify('已处置告警');
+    } catch (e) { notify('处置告警失败：' + (e as Error).message, true); }
+  }
+
   function focusUser(id: string) {
     update({ sessUser: id, sessDept: '', auditUser: id });
     fetchSessions({ userId: id, dept: '', from: undefined }).catch((e) => notify('检索失败：' + (e as Error).message, true));
@@ -520,7 +531,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

@@ -250,6 +250,7 @@ function StatsSection({ state }: { state: AppState }) {
         <Badge tone="b-cloud">{'任务 ' + s.totals.tasks}</Badge>
         <Badge tone="b-off">{'失败 ' + s.totals.failed}</Badge>
         <Badge tone="b-dim">{'待审批 ' + s.totals.pendingApprovals}</Badge>
+        {s.totals.quotaOpenAlerts ? <Badge tone="b-warn">{'配额告警 ' + s.totals.quotaOpenAlerts}</Badge> : null}
       </div>
       <table>
         <thead><tr><th>助手</th><th className="num">总数</th><th className="num">失败</th></tr></thead>
@@ -288,14 +289,38 @@ function QuotaSection({ state, act }: Props) {
         </table>
       )}
       <div className="row" style={{ marginTop: 10 }}>
-        <select value={state.qScope} onChange={(e) => act.update({ qScope: e.target.value as 'all' | 'user' })}>
+        <select value={state.qScope} onChange={(e) => act.update({ qScope: e.target.value as 'all' | 'user' | 'dept' })}>
           <option value="all">全员</option>
           <option value="user">用户</option>
+          <option value="dept">部门</option>
         </select>
-        <input placeholder="user 时填用户 id / keyId" value={state.qScopeId} style={{ flex: 1 }} onChange={(e) => act.update({ qScopeId: e.target.value })} />
+        <input placeholder="user/dept 时填 id / 部门名" value={state.qScopeId} style={{ flex: 1 }} onChange={(e) => act.update({ qScopeId: e.target.value })} />
         <input type="number" value={state.qBudget} min="1" style={{ width: 90 }} onChange={(e) => act.update({ qBudget: e.target.value })} />
         <button onClick={() => void act.setQuota()}>设置/更新</button>
       </div>
+
+      <h2 className="plain-head" style={{ marginTop: 18 }}>告警 <span className="hint">{state.quotaAlerts.length + ' 条未处置'}</span></h2>
+      {state.quotaAlerts.length === 0 ? (
+        <Empty>无未处置告警</Empty>
+      ) : (
+        <table>
+          <thead><tr><th>范围</th><th>用户</th><th>用量</th><th>周期</th><th>触发</th><th></th></tr></thead>
+          <tbody>
+            {state.quotaAlerts.map((a) => (
+              <tr key={a.id}>
+                <td className="mono">{a.scopeType + ':' + (a.scopeId || 'all')}</td>
+                <td className="mono">{a.userId ? shortId(a.userId) : '—'}</td>
+                <td className="mono num">{a.usedRequests + '/' + a.budgetRequests}</td>
+                <td className="mono">{a.period}</td>
+                <td className="mono">{fmtTs(a.createdAt)}</td>
+                <td>
+                  <button className="ok small" onClick={() => void act.resolveQuotaAlert(a.id)}>处置</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

@@ -36,3 +36,14 @@ spec §2.2 关键发现：DSH **全仓无限流/配额包**，`dsh-token-meter`/
 > - 实测：用户级 2/天 覆盖全员 20/天；第 3 次触发 → HTTP 429「配额已用尽：1/1（day）」；用量落库
 > - 管理 UI 已加配额面板（策略列表 + 设置）
 > 遗留：网关（03）token/成本记账对接；warn 策略的告警通道（当前日志）；部门级策略（等 07 组织同步）。
+
+> 2025-08-22：**warn 告警闭环 + 部门级策略落地**（16 收尾）。
+> - 迁移 009：quota_alerts（policy_id/user_id/scope/period/budget/used/message/resolved_at），warn 超限不再只打日志
+> - QuotaService w/ AuditStore：warn 超限去重落库一条可处置告警（同策略+周期+用户未处置则不重复）+ 审计 quota.warn；持久化失败 fail-soft
+> - API：GET /admin/quota/alerts（quota.view）、POST /admin/quota/alerts/:id/resolve（quota.manage，置 resolved_at + 审计 quota.alert.resolved）
+> - 部门级策略生效：TasksService.submit 传用户 dept（user→dept→all 最具体者优先）；管理后台配额面板加「部门」档位 + 告警列表一键处置；用量看板显示未处置告警数
+> - 单测 8/8 + 真实 PG 集成冒烟通过（warn→去重、处置、重新告警、部门级命中）；控制面 70/70、web 18/18
+> - 语义修正：`checkAndRecord` 返回独立 `blocked` 标志（reject 超限=true / warn 超限=false），
+>   `TasksService.submit` 仅在 `blocked` 时抛「配额已用尽」——warn 超限实为放行（已告警），不再被当 reject 硬拒；
+>   告警去重经 009 部分唯一索引原子化（ON CONFLICT DO NOTHING）
+> 遗留：网关（03）token/成本记账对接（warn 告警通道与部门级策略已不再是遗留项）。

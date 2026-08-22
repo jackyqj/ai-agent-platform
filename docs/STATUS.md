@@ -33,7 +33,7 @@
 |---|---|---|
 | 11 试点扩量 | Phase 1 | 05 试点结果 |
 | 15 审计看板 | ✅ 用量聚合 API + 看板 UI（任务/失败/Agent/配额/错误） | token 成本口径 + OTel 全链路（等 03 网关/日志平台） |
-| 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 | token/成本记账（等 03 网关）；warn 告警通道 |
+| 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 + **warn 告警闭环**（quota_alerts 落库可处置 + 审计 quota.warn + 管理后台一键处置）+ **部门级策略**（submit 传 dept，user→dept→all 生效）+ **warn 放行/reject 拦截**（blocked 信号） | token/成本记账（等 03 网关） |
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |
 | 18 IM 机器人 | **✅ Stream 模式机器人实连 + 桥接全链路**：官方 SDK 长连接（真实凭证 connected=true）、@消息→身份解析→preset 路由→任务入队→受理回执→终态主动推送（sink 捕获实测）；敏感操作分层守卫（8/8 单测） | im/status 在线；simulate 路由/入队/回推全通 | 真实群 @ 验收（需把机器人拉进群）、worker 执行质量（等 Qwen 回归） |
 | 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测） | 时区/完整 cron/失败告警 |

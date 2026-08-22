@@ -1,25 +1,27 @@
 import { useEffect } from 'react';
-import { useApp, API_HOST_DISPLAY, type Actions } from './useApp';
-import { SectionHead } from './ui';
+import { API_HOST_DISPLAY, parseLocation, useApp, type Actions } from './useApp';
 import StoreView from './StoreView';
 import AdminView from './AdminView';
+import ChatView from './ChatView';
 import type { Client } from './store-client';
-import type { AppState } from './types';
+import type { AdminPane, AppState } from './types';
 
 export default function App({ client }: { client?: Client }) {
   const { state, act } = useApp(client);
   const isAdmin = state.me?.role === 'admin';
-  const route = isAdmin ? state.route : 'store';
+  const route = !state.me ? 'store' : (isAdmin || state.route !== 'admin' ? state.route : 'store');
 
-  // Deep-link / back-forward sync.
   useEffect(() => {
     const onHash = () => {
-      const want = location.hash === '#admin' ? 'admin' : 'store';
-      if (state.me?.role === 'admin' && state.route !== want) act.update({ route: want });
+      if (!state.me) return;
+      const parsed = parseLocation(location.hash, state.me.role);
+      if (parsed.route !== state.route || parsed.adminPane !== state.adminPane) {
+        act.update({ route: parsed.route === 'chat' && !state.chat ? 'store' : parsed.route, adminPane: parsed.adminPane });
+      }
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, [state.me?.role, state.route, act]);
+  }, [state.me, state.route, state.adminPane, state.chat, act]);
 
   return (
     <div className="shell">
@@ -27,6 +29,8 @@ export default function App({ client }: { client?: Client }) {
       <main className="main">
         {!state.me ? (
           <LoginView state={state} act={act} />
+        ) : route === 'chat' && state.chat ? (
+          <ChatView state={state} act={act} />
         ) : route === 'admin' && isAdmin ? (
           <AdminView state={state} act={act} />
         ) : (
@@ -39,13 +43,14 @@ export default function App({ client }: { client?: Client }) {
 }
 
 function Topbar({ isAdmin, route, state, act }: { isAdmin: boolean; route: string; state: AppState; act: Actions }) {
-  const nav = (key: 'store' | 'admin', label: string) => (
+  const go = (key: 'store' | 'admin', label: string) => (
     <a
       className={route === key ? 'active' : ''}
       href={'#' + key}
       onClick={(e) => {
         e.preventDefault();
-        act.update({ route: key });
+        const adminPane: AdminPane = key === 'admin' ? 'workbench' : state.adminPane;
+        act.update({ route: key, adminPane, chat: key === 'store' ? null : state.chat });
         history.replaceState(null, '', '#' + key);
       }}
     >
@@ -58,12 +63,12 @@ function Topbar({ isAdmin, route, state, act }: { isAdmin: boolean; route: strin
       <div className="brand">
         <span className="mark">◈</span>
         <span>AI Agent 平台</span>
-        <span className="tag">probe bench</span>
+        <span className="tag">试点</span>
       </div>
       {isAdmin ? (
         <nav className="nav">
-          {nav('store', '商店')}
-          {nav('admin', '管理')}
+          {go('store', '商店')}
+          {go('admin', '管理')}
         </nav>
       ) : null}
       {state.me ? (
@@ -80,16 +85,25 @@ function Topbar({ isAdmin, route, state, act }: { isAdmin: boolean; route: strin
 function LoginView({ state, act }: { state: AppState; act: Actions }) {
   return (
     <div className="login card">
-      <SectionHead idx="AUTH" title="登录" />
-      <div className="row">
-        <input
-          placeholder="用户 id（u-admin / u-dev-1 / u-hr-1）"
-          value={state.loginUser}
-          onChange={(e) => act.update({ loginUser: e.target.value })}
-        />
-        <button onClick={() => void act.login()}>{state.loading ? '…' : '登录（dev）'}</button>
-      </div>
-      <div className="hint">{'本地演示版（dev 认证）\n控制面 ' + API_HOST_DISPLAY}</div>
+      <h2>登录</h2>
+      <p className="login-lead">用钉钉账号进入助手商店。本地开发可展开下面的开发登录。</p>
+      <a className="sso" href="/api/auth/sso/login">使用钉钉登录</a>
+      {state.showDevLogin ? (
+        <div className="dev-login">
+          <div className="row">
+            <input
+              placeholder="用户 id（u-admin / u-dev-1 / u-hr-1）"
+              value={state.loginUser}
+              onChange={(e) => act.update({ loginUser: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') void act.login(); }}
+            />
+            <button onClick={() => void act.login()}>{state.loading ? '…' : '登录'}</button>
+          </div>
+          <div className="hint">开发认证 · 控制面 {API_HOST_DISPLAY}</div>
+        </div>
+      ) : (
+        <button className="ghost" onClick={() => act.update({ showDevLogin: true })}>本地开发登录</button>
+      )}
     </div>
   );
 }

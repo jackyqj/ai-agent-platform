@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, Approval, AuditEvent, Instance, Me, ModelsBody, QuotaPolicy, SessionRow, StatsBody, User } from './types';
+import type { Agent, Approval, AuditEvent, Instance, Me, ModelsBody, QuotaPolicy, SessionRow, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -31,7 +31,11 @@ export interface Client {
   me(): Promise<Me>;
 
   listAgents(): Promise<{ agents: Agent[] }>;
+  listSessions(): Promise<{ sessions: SessionRow[] }>;
   createSession(agentPresetId: string): Promise<{ sessionId: string; routingSecret: string }>;
+  getSession(id: string): Promise<{ id: string; status: string; agentPresetId: string }>;
+  submitTask(agentPresetId: string, task: string): Promise<TaskSubmitResult>;
+  getTask(id: string): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
 
   admin: {
@@ -112,7 +116,11 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     me: () => request<Me>('/me'),
 
     listAgents: () => request<{ agents: Agent[] }>('/agents'),
+    listSessions: () => request<{ sessions: SessionRow[] }>('/sessions'),
     createSession: (agentPresetId) => request<{ sessionId: string; routingSecret: string }>('/sessions', { method: 'POST', body: { agentPresetId } }),
+    getSession: (id) => request<{ id: string; status: string; agentPresetId: string }>(`/sessions/${id}`),
+    submitTask: (agentPresetId, task) => request<TaskSubmitResult>('/tasks', { method: 'POST', body: { agentPresetId, task } }),
+    getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
 
     admin: {

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 import type { Client } from './store-client';
@@ -12,7 +12,13 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     devLogin: vi.fn(async () => ({ accessToken: 't' })),
     me: vi.fn(async () => ({ id: 'u-admin', name: '管理员', role: 'admin', dept: 'IT' })),
     listAgents: vi.fn(async () => ({ agents: [] })),
-    createSession: vi.fn(async () => ({ sessionId: 's1', routingSecret: 'r' })),
+    listSessions: vi.fn(async () => ({ sessions: [] })),
+    createSession: vi.fn(async () => ({ sessionId: 's1', routingSecret: 'secret-should-stay-hidden' })),
+    getSession: vi.fn(async () => ({ id: 's1', status: 'active', agentPresetId: 'assistant' })),
+    submitTask: vi.fn(async () => ({ taskId: 't1', status: 'queued', awaitingApproval: false })),
+    getTask: vi.fn(async () => ({
+      task: { id: 't1', status: 'done', payload: { task: '你好' }, result: { finalResponse: '好的' } },
+    })),
     proposeAgent: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, notice: 'ok' })),
     admin: {
       pendingApprovals: vi.fn(async () => ({ approvals: [] })),
@@ -38,21 +44,62 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
   };
 }
 
+const assistant = {
+  id: 'assistant',
+  name: '通用助手',
+  description: '问日常问题',
+  modelRoute: { model: 'deepseek-v4-flash' },
+  approvalLevel: 'none',
+};
+
+async function expandDevLogin(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '本地开发登录' }));
+}
+
+async function loginAs(client: Client, user = userEvent.setup()) {
+  render(<App client={client} />);
+  await expandDevLogin(user);
+  await user.click(screen.getByRole('button', { name: '登录' }));
+  await waitFor(() => expect(screen.getByText('助手商店')).toBeInTheDocument());
+  return user;
+}
+
 describe('App', () => {
-  it('renders the login view when there is no stored token', () => {
-    render(<App client={fakeClient()} />);
-    expect(screen.getByRole('button', { name: '登录（dev）' })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/用户 id/)).toBeInTheDocument();
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
   });
 
-  it('logs in and shows the store', async () => {
+  it('shows DingTalk SSO as the primary login and hides the dev form', () => {
+    render(<App client={fakeClient()} />);
+    expect(screen.getByRole('link', { name: '使用钉钉登录' })).toHaveAttribute('href', '/api/auth/sso/login');
+    expect(screen.queryByRole('button', { name: '登录' })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/用户 id/)).not.toBeInTheDocument();
+  });
+
+  it('applies an SSO token from the hash and opens the store', async () => {
+    window.history.replaceState(null, '', '/#token=sso-tok');
+    let tok = '';
+    const client = fakeClient({
+      me: vi.fn(async () => ({ id: 'u-hr-1', name: 'HR', role: 'employee', dept: '人事' })),
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+    });
+    Object.defineProperty(client, 'token', { get: () => tok });
+    client.setToken = (t: string) => { tok = t; };
+    render(<App client={client} />);
+    await waitFor(() => expect(screen.getByText('通用助手')).toBeInTheDocument());
+    expect(tok).toBe('sso-tok');
+    expect(client.me).toHaveBeenCalled();
+  });
+
+  it('logs in via the folded dev form and shows the store', async () => {
     const user = userEvent.setup();
     const client = fakeClient();
     render(<App client={client} />);
+    await expandDevLogin(user);
     await user.clear(screen.getByPlaceholderText(/用户 id/));
     await user.type(screen.getByPlaceholderText(/用户 id/), 'u-admin');
-    await user.click(screen.getByRole('button', { name: '登录（dev）' }));
-    await waitFor(() => expect(screen.getByText('Agent 商店')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await waitFor(() => expect(screen.getByText('助手商店')).toBeInTheDocument());
     expect(client.devLogin).toHaveBeenCalledWith('u-admin');
   });
 
@@ -60,9 +107,125 @@ describe('App', () => {
     const client = fakeClient({
       token: 'tok',
       me: vi.fn(async () => ({ id: 'u-dev-1', name: '开发', role: 'developer', dept: '研发' })),
-      listAgents: vi.fn(async () => ({ agents: [{ id: 'assistant', name: '通用助手', description: '底座', modelRoute: { model: 'deepseek-v4-flash' }, approvalLevel: 'none' }] })),
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
     });
     render(<App client={client} />);
     await waitFor(() => expect(screen.getByText('通用助手')).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: '管理' })).not.toBeInTheDocument();
+  });
+
+  it('starts a conversation without showing the routing secret', async () => {
+    const client = fakeClient({
+      me: vi.fn(async () => ({ id: 'u-hr-1', name: 'HR', role: 'employee', dept: '人事' })),
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: '开始对话' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    expect(client.createSession).toHaveBeenCalledWith('assistant');
+    expect(screen.getByRole('heading', { name: '通用助手' })).toBeInTheDocument();
+    expect(screen.queryByText(/密钥/)).not.toBeInTheDocument();
+    expect(screen.queryByText('secret-should-stay-hidden')).not.toBeInTheDocument();
+    expect(screen.queryByText(/选用/)).not.toBeInTheDocument();
+  });
+
+  it('reuses an active session instead of creating another', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listSessions: vi.fn(async () => ({
+        sessions: [{ id: 'sess-open', userId: 'u-admin', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+      })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: '开始对话' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    expect(client.createSession).not.toHaveBeenCalled();
+  });
+
+  it('shows a retryable message when the instance fails to start', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      createSession: vi.fn(async () => {
+        throw new Error('instance timeout');
+      }),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: '开始对话' }));
+    await waitFor(() => expect(screen.getByText(/实例还没起来，请稍后重试/)).toBeInTheDocument());
+    expect(screen.queryByText(/密钥/)).not.toBeInTheDocument();
+  });
+
+  it('lists my conversations and continues an existing one', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listSessions: vi.fn(async () => ({
+        sessions: [{ id: 'sess-2', userId: 'u-admin', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+      })),
+    });
+    const user = await loginAs(client);
+    expect(screen.getByText('我的对话')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /继续.*通用助手/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    expect(client.createSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps propose behind a secondary control', async () => {
+    const client = fakeClient({ listAgents: vi.fn(async () => ({ agents: [assistant] })) });
+    await loginAs(client);
+    expect(screen.queryByPlaceholderText(/id（如/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '申请新助手' })).toBeInTheDocument();
+  });
+
+  it('splits admin into workbench, config, and investigate', async () => {
+    const user = await loginAs(fakeClient());
+    await user.click(screen.getByRole('link', { name: '管理' }));
+    expect(screen.getByRole('tab', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '配置' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '调查' })).toBeInTheDocument();
+    expect(screen.getByText('待审批')).toBeInTheDocument();
+    expect(screen.queryByText('审计查询')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: '调查' }));
+    expect(screen.getByText('审计')).toBeInTheDocument();
+  });
+
+  it('asks for confirmation before disabling a user', async () => {
+    const client = fakeClient({
+      admin: {
+        ...fakeClient().admin,
+        users: vi.fn(async () => ({
+          users: [{ id: 'u-hr-1', name: 'HR', dept: '人事', role: 'employee', status: 'active' }],
+        })),
+      },
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('link', { name: '管理' }));
+    await user.click(screen.getByRole('tab', { name: '调查' }));
+    await user.click(screen.getByRole('button', { name: '禁用' }));
+    expect(screen.getByText(/会立即回收该用户的实例/)).toBeInTheDocument();
+    expect(client.admin.patchUser).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '确认禁用' }));
+    await waitFor(() => expect(client.admin.patchUser).toHaveBeenCalledWith('u-hr-1', { status: 'disabled' }));
+  });
+
+  it('shows session events beside the session table', async () => {
+    const client = fakeClient({
+      admin: {
+        ...fakeClient().admin,
+        sessions: vi.fn(async () => ({
+          sessions: [{ id: 'sess-9', userId: 'u-hr-1', userName: 'HR', dept: '人事', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+        })),
+        session: vi.fn(async () => ({
+          session: { id: 'sess-9', userId: 'u-hr-1', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' },
+          events: [{ ts: '2026-08-21T00:00:01Z', eventType: 'session.create', payload: {} }],
+        })),
+      },
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('link', { name: '管理' }));
+    await user.click(screen.getByRole('tab', { name: '调查' }));
+    const table = screen.getByRole('table');
+    await user.click(within(table).getByText('HR'));
+    await waitFor(() => expect(screen.getByText(/session.create/)).toBeInTheDocument());
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
   });
 });

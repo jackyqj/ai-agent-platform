@@ -29,6 +29,22 @@ export class TasksController {
     }
   }
 
+  /** 登录用户提交任务（商店对话） */
+  @Post('tasks')
+  @UseGuards(AuthGuard)
+  async create(@Req() req: { user: { sub: string } }, @Body() body: { task?: string; agentPresetId?: string }) {
+    if (!body.task || !body.task.trim()) {
+      throw new HttpException('task text required', HttpStatus.BAD_REQUEST)
+    }
+    try {
+      const record = await this.tasks.submit(req.user.sub, body.agentPresetId ?? 'assistant', body.task)
+      return { accepted: true, taskId: record.id, status: record.status, awaitingApproval: record.awaitingApproval ?? false }
+    } catch (e) {
+      const message = (e as Error).message
+      throw new HttpException(message, message.startsWith('配额') ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.BAD_REQUEST)
+    }
+  }
+
   /** 我的任务列表（用户） */
   @Get('tasks')
   @UseGuards(AuthGuard)

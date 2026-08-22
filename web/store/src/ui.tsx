@@ -29,3 +29,25 @@ export function LoadError({ msg }: { msg?: string }) {
 export function permBadge(mode?: string): string {
   return mode === 'danger-full-access' ? 'b-off' : mode === 'read-only' ? 'b-cloud' : 'b-ok';
 }
+
+export function ConfirmBar({
+  body,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="confirm" role="alertdialog">
+      <p>{body}</p>
+      <div className="row">
+        <button className="danger" onClick={onConfirm}>{confirmLabel}</button>
+        <button className="ghost" onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  );
+}

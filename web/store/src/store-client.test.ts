@@ -79,4 +79,12 @@ describe('store-client', () => {
     expect(calls[0].headers).toMatchObject({ 'Content-Type': 'application/json' });
     expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant' }));
   });
+
+  it('submitTask posts the question to /tasks', async () => {
+    const calls = stubFetch(async () => okJson({ taskId: 't1', status: 'queued' }));
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.submitTask('assistant', '请假制度是什么');
+    expect(calls[0].url).toBe('http://x/api/tasks');
+    expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant', task: '请假制度是什么' }));
+  });
 });

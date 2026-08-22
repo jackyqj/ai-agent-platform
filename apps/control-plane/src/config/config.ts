@@ -19,6 +19,7 @@ export interface AppConfig {
   }
   /** 部门名 → 角色 映射（D12 部门标签驱动），逗号分隔：IT:developer,R&D:developer,Admin:admin */
   roleMapByDept: Record<string, string>
+  frontendOrigin: string
   /** 实例编排器：memory（开发/冒烟）| docker（生产） */
   orchestrator: 'memory' | 'docker'
   /** docker 模式：dsh-web 镜像名（02 工单公司 profile 镜像） */
@@ -54,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       robotCode: env.CP_DINGTALK_ROBOT_CODE ?? '',
     },
     roleMapByDept: csvMap(env.CP_ROLE_MAP_BY_DEPT),
+    frontendOrigin: env.CP_FRONTEND_ORIGIN ?? 'http://127.0.0.1:5173',
     orchestrator: (env.CP_ORCHESTRATOR ?? 'memory') as AppConfig['orchestrator'],
     dshWebImage: env.CP_DSH_WEB_IMAGE ?? 'company-dsh-web:latest',
     maxConcurrentInstances: Number(env.CP_MAX_INSTANCES ?? 30),

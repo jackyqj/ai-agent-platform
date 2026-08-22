@@ -3,6 +3,7 @@ import { AuthGuard } from '../common/auth.guard.js'
 import { AuthService } from './auth.service.js'
 import { UsersService } from '../users/users.service.js'
 import { PermissionPolicyService } from '../common/permission-policy.service.js'
+import { loadConfig } from '../config/config.js'
 
 @Controller()
 export class AuthController {
@@ -33,12 +34,15 @@ export class AuthController {
     }
   }
 
-  /** oidc 模式：回调换票（state 防 CSRF） */
+  /** oidc 模式：回调换票（state 防 CSRF），浏览器跳回商店并带上 token */
   @Get('auth/sso/callback')
+  @Redirect()
   async ssoCallback(@Query('code') code?: string, @Query('state') state?: string) {
     if (!code) throw new HttpException('missing code', HttpStatus.BAD_REQUEST)
     try {
-      return await this.auth.oidcCallback(code, state)
+      const result = await this.auth.oidcCallback(code, state)
+      const origin = loadConfig().frontendOrigin.replace(/\/$/, '')
+      return { url: `${origin}/#token=${encodeURIComponent(result.accessToken)}`, statusCode: 302 }
     } catch (e) {
       throw new HttpException(`oidc callback failed: ${(e as Error).message}`, HttpStatus.UNAUTHORIZED)
     }

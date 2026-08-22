@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
-import type { AppState, Route } from './types';
+import type { AdminPane, AppState, Route } from './types';
 import { localToIso } from './util';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -11,12 +11,16 @@ const initial: AppState = {
   route: 'store',
   loading: false,
   loginUser: 'u-admin',
+  showDevLogin: false,
   toast: null,
   toastErr: false,
 
   agents: [],
   agentBusy: {},
-  agentResults: {},
+  mySessions: [],
+  chat: null,
+  adminPane: 'workbench',
+  showPropose: false,
 
   pId: '',
   pName: '',
@@ -60,7 +64,10 @@ export interface Actions {
   logout(): void;
   loadStore(): Promise<void>;
   loadAdminData(): Promise<void>;
-  useAgent(id: string): Promise<void>;
+  startChat(agentId: string): Promise<void>;
+  openChat(sessionId: string, agentId: string): void;
+  closeChat(): void;
+  sendMessage(agentId: string, text: string): Promise<string>;
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
@@ -99,8 +106,15 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const r = await client.listAgents();
-      setState((prev) => ({ ...prev, agents: r.agents || [] }));
+      const [agentsRes, sessionsRes] = await Promise.all([
+        client.listAgents(),
+        client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
+      ]);
+      setState((prev) => ({
+        ...prev,
+        agents: agentsRes.agents || [],
+        mySessions: (sessionsRes.sessions || []).filter((s) => s.status !== 'closed'),
+      }));
     } catch (e) {
       notify('加载商店失败：' + (e as Error).message, true);
     }
@@ -150,8 +164,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     try {
       await client.devLogin(state.loginUser);
       const me = await client.me();
-      const route: Route = location.hash === '#admin' && me.role === 'admin' ? 'admin' : 'store';
-      update({ me, route });
+      const parsed = parseLocation(location.hash, me.role);
+      update({ me, route: parsed.route, adminPane: parsed.adminPane, showDevLogin: false });
       await loadStore();
       if (me.role === 'admin') await loadAdminData();
       notify('已登录：' + me.name);
@@ -166,15 +180,52 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     setState(initial);
   }
 
-  async function useAgent(id: string) {
-    setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [id]: true } }));
-    try {
-      const r = await client.createSession(id);
-      setState((prev) => ({ ...prev, agentResults: { ...prev.agentResults, [id]: '会话 ' + r.sessionId + '\n密钥 ' + r.routingSecret } }));
-    } catch (e) {
-      setState((prev) => ({ ...prev, agentResults: { ...prev.agentResults, [id]: '失败：' + (e as Error).message } }));
+  function openChat(sessionId: string, agentId: string) {
+    setState((prev) => ({
+      ...prev,
+      route: 'chat',
+      chat: { sessionId, agentId, error: null },
+    }));
+    history.replaceState(null, '', '#chat');
+  }
+
+  function closeChat() {
+    setState((prev) => ({ ...prev, route: 'store', chat: null }));
+    history.replaceState(null, '', '#store');
+  }
+
+  async function startChat(agentId: string) {
+    const existing = state.mySessions.find((s) => s.agentPresetId === agentId && s.status !== 'closed');
+    if (existing) {
+      openChat(existing.id, agentId);
+      return;
     }
-    setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [id]: false } }));
+    setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [agentId]: true } }));
+    try {
+      const r = await client.createSession(agentId);
+      await loadStore();
+      openChat(r.sessionId, agentId);
+    } catch {
+      setState((prev) => ({
+        ...prev,
+        route: 'chat',
+        chat: { sessionId: null, agentId, error: '实例还没起来，请稍后重试' },
+      }));
+      history.replaceState(null, '', '#chat');
+    }
+    setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [agentId]: false } }));
+  }
+
+  async function sendMessage(agentId: string, text: string): Promise<string> {
+    const r = await client.submitTask(agentId, text);
+    if (r.awaitingApproval) return '已提交，等待审批通过后执行。';
+    for (let i = 0; i < 40; i++) {
+      const g = await client.getTask(r.taskId);
+      if (g.task.status === 'done') return g.task.result?.finalResponse ?? '（无回复）';
+      if (g.task.status === 'failed') throw new Error(g.task.error || '任务失败');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return '仍在执行。刷新对话或稍后再看结果。';
   }
 
   async function propose() {
@@ -310,16 +361,22 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('查询失败：' + (e as Error).message, true); }
   }
 
-  // Restore a stored session on first mount.
+  // Restore a stored session on first mount. SSO callback lands on #token=.
   useEffect(() => {
+    const raw = location.hash.replace(/^#/, '');
+    const ssoToken = new URLSearchParams(raw).get('token');
+    if (ssoToken) {
+      client.setToken(ssoToken);
+      history.replaceState(null, '', location.pathname + location.search);
+    }
     if (!client.token) return;
     let cancelled = false;
     (async () => {
       try {
         const me = await client.me();
         if (cancelled) return;
-        const route: Route = location.hash === '#admin' && me.role === 'admin' ? 'admin' : 'store';
-        setState((prev) => ({ ...prev, me, route }));
+        const parsed = parseLocation(ssoToken ? '' : location.hash, me.role);
+        setState((prev) => ({ ...prev, me, route: parsed.route, adminPane: parsed.adminPane }));
         await loadStore();
         if (me.role === 'admin') await loadAdminData();
       } catch {
@@ -336,11 +393,22 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   }, []);
 
   const act: Actions = {
-    update, notify, login, logout, loadStore, loadAdminData, useAgent, propose,
+    update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
     decide, toggleAgent, setQuota, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
   };
 
   return { state, act };
+}
+
+export function parseLocation(hash: string, role: string): { route: Route; adminPane: AdminPane } {
+  const h = hash.replace(/^#/, '');
+  if (h === 'chat' || h.startsWith('chat/')) return { route: 'chat', adminPane: 'workbench' };
+  if (h.startsWith('admin')) {
+    if (role !== 'admin') return { route: 'store', adminPane: 'workbench' };
+    const adminPane: AdminPane = h === 'admin/config' ? 'config' : h === 'admin/investigate' ? 'investigate' : 'workbench';
+    return { route: 'admin', adminPane };
+  }
+  return { route: 'store', adminPane: 'workbench' };
 }

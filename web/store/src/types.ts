@@ -99,7 +99,28 @@ export interface ModelsBody {
 
 // ── app state (what the views render) ────────────────────
 
-export type Route = 'store' | 'admin';
+export type Route = 'store' | 'admin' | 'chat';
+export type AdminPane = 'workbench' | 'config' | 'investigate';
+
+export interface ChatState {
+  sessionId: string | null;
+  agentId: string;
+  error: string | null;
+}
+
+export interface TaskSubmitResult {
+  taskId: string;
+  status: string;
+  awaitingApproval?: boolean;
+}
+
+export interface TaskView {
+  id: string;
+  status: string;
+  payload: { task: string };
+  result?: { finalResponse: string };
+  error?: string;
+}
 
 export interface SessionDetail {
   session: { id: string; userId?: string; agentPresetId?: string; status?: string };
@@ -112,12 +133,16 @@ export interface AppState {
   route: Route;
   loading: boolean;
   loginUser: string;
+  showDevLogin: boolean;
   toast: string | null;
   toastErr: boolean;
 
   agents: Agent[];
   agentBusy: Record<string, boolean>;
-  agentResults: Record<string, string>;
+  mySessions: SessionRow[];
+  chat: ChatState | null;
+  adminPane: AdminPane;
+  showPropose: boolean;
 
   pId: string;
   pName: string;

@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
-import { API_HOST_DISPLAY, type Actions } from './useApp';
-import { Badge, Empty, LiveDot, LoadError, SectionHead, permBadge } from './ui';
+import { useState } from 'react';
+import { type Actions } from './useApp';
+import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge } from './ui';
 import { fmtTs, shortId } from './util';
-import type { AppState } from './types';
+import type { AdminPane, AppState } from './types';
 
-const SECTIONS: [string, string][] = [
-  ['approvals', '待审批'], ['agents', '上架/下架'], ['stats', '用量看板'], ['quota', '配额'],
-  ['users', '用户'], ['sessions', '会话'], ['events', '事件摘要'], ['instances', '实例'],
-  ['rbac', '权限'], ['models', '模型'], ['audit', '审计'],
+const TABS: { id: AdminPane; label: string; hash: string }[] = [
+  { id: 'workbench', label: '工作台', hash: '#admin' },
+  { id: 'config', label: '配置', hash: '#admin/config' },
+  { id: 'investigate', label: '调查', hash: '#admin/investigate' },
 ];
 
 const ROLES = ['employee', 'developer', 'admin'];
@@ -18,64 +18,139 @@ interface Props {
   act: Actions;
 }
 
-export default function AdminView({ state, act }: Props) {
-  const [activeId, setActiveId] = useState(SECTIONS[0][0]);
-  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+type Pending =
+  | { kind: 'disable'; id: string; name: string }
+  | { kind: 'unpublish'; id: string; name: string }
+  | { kind: 'stop'; id: string }
+  | { kind: 'reap' };
 
-  // Scroll-spy: highlight the indexbar entry of the section currently under the
-  // sticky header. `offset` sits just below topbar + indexbar; near the bottom
-  // the last section wins even if it never reaches the detection line.
-  useEffect(() => {
-    const ids = SECTIONS.map(([id]) => id);
-    const onScroll = () => {
-      const offset = 120;
-      let current = ids[0];
-      for (const id of ids) {
-        const el = document.getElementById(id);
-        if (el && el.getBoundingClientRect().top <= offset) current = id;
+export default function AdminView({ state, act }: Props) {
+  const [pending, setPending] = useState<Pending | null>(null);
+  const pane = state.adminPane;
+
+  function setPane(id: AdminPane, hash: string) {
+    act.update({ adminPane: id });
+    history.replaceState(null, '', hash);
+  }
+
+  function runPending() {
+    if (!pending) return;
+    switch (pending.kind) {
+      case 'disable':
+        void act.setStatus(pending.id, 'disabled');
+        break;
+      case 'unpublish':
+        void act.toggleAgent(pending.id, 'published');
+        break;
+      case 'stop':
+        void act.stopInstance(pending.id);
+        break;
+      case 'reap':
+        void act.reapIdle();
+        break;
+      default: {
+        const _n: never = pending;
+        return _n;
       }
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 60) {
-        current = ids[ids.length - 1];
-      }
-      setActiveId(current);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+    }
+    setPending(null);
+  }
 
   return (
     <div>
       <div className="page-head">
         <h1>管理后台</h1>
-        <div className="sub">用户 · 实例 · 会话 · 模型 · 审计 — <span className="token">{API_HOST_DISPLAY}</span></div>
+        <div className="sub">工作台处理待办，配置管目录与配额，调查查会话与审计</div>
       </div>
-      <div className="indexbar">
-        {SECTIONS.map(([id, label]) => (
-          <a key={id} href={'#' + id} className={activeId === id ? 'active' : ''} onClick={(e) => { e.preventDefault(); scrollTo(id); }}>{label}</a>
+      <div className="indexbar" role="tablist">
+        {TABS.map((t) => (
+          <a
+            key={t.id}
+            role="tab"
+            aria-selected={pane === t.id}
+            href={t.hash}
+            className={pane === t.id ? 'active' : ''}
+            onClick={(e) => { e.preventDefault(); setPane(t.id, t.hash); }}
+          >
+            {t.label}
+          </a>
         ))}
       </div>
 
-      <ApprovalsSection state={state} act={act} />
-      <AgentsSection state={state} act={act} />
-      <StatsSection state={state} />
-      <QuotaSection state={state} act={act} />
-      <UsersSection state={state} act={act} />
-      <SessionsSection state={state} act={act} />
-      <EventsSection state={state} />
-      <InstancesSection state={state} act={act} />
-      <RbacSection state={state} act={act} />
-      <ModelsSection state={state} />
-      <AuditSection state={state} act={act} />
+      {pending ? (
+        <ConfirmBar
+          body={confirmBody(pending)}
+          confirmLabel={confirmLabel(pending)}
+          onConfirm={runPending}
+          onCancel={() => setPending(null)}
+        />
+      ) : null}
+
+      {pane === 'workbench' ? (
+        <>
+          <ApprovalsSection state={state} act={act} />
+          <StatsSection state={state} />
+          <InstancesSection state={state} act={act} onStop={(id) => setPending({ kind: 'stop', id })} onReap={() => setPending({ kind: 'reap' })} />
+        </>
+      ) : null}
+      {pane === 'config' ? (
+        <>
+          <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} />
+          <QuotaSection state={state} act={act} />
+          <RbacSection state={state} act={act} />
+          <ModelsSection state={state} />
+        </>
+      ) : null}
+      {pane === 'investigate' ? (
+        <>
+          <UsersSection state={state} act={act} onDisable={(id, name) => setPending({ kind: 'disable', id, name })} />
+          <SessionsInvestigate state={state} act={act} />
+          <AuditSection state={state} act={act} />
+        </>
+      ) : null}
     </div>
   );
+}
+
+function confirmBody(p: Pending): string {
+  switch (p.kind) {
+    case 'disable':
+      return `禁用 ${p.name} 会立即回收该用户的实例。`;
+    case 'unpublish':
+      return `下架「${p.name}」后，新会话将无法选用。存量会话不受影响。`;
+    case 'stop':
+      return '回收该实例会断开用户当前对话。';
+    case 'reap':
+      return '回收全部空闲实例。正在对话的实例不受影响。';
+    default: {
+      const _n: never = p;
+      return _n;
+    }
+  }
+}
+
+function confirmLabel(p: Pending): string {
+  switch (p.kind) {
+    case 'disable':
+      return '确认禁用';
+    case 'unpublish':
+      return '确认下架';
+    case 'stop':
+      return '确认回收';
+    case 'reap':
+      return '确认回收空闲';
+    default: {
+      const _n: never = p;
+      return _n;
+    }
+  }
 }
 
 function ApprovalsSection({ state, act }: Props) {
   const pend = state.approvals;
   return (
-    <section className="section" id="approvals">
-      <SectionHead idx="A1" title="待审批" />
+    <section className="section">
+      <h2 className="plain-head">待审批</h2>
       {pend.length === 0 ? (
         <Empty>无待审批</Empty>
       ) : (
@@ -85,7 +160,7 @@ function ApprovalsSection({ state, act }: Props) {
             {pend.map((a) => (
               <tr key={a.id}>
                 <td className="mono">{shortId(a.requesterUserId)}</td>
-                <td>{a.action.slice(0, 40)}</td>
+                <td>{a.action}</td>
                 <td className="mono">{a.level}</td>
                 <td>
                   <span className="row" style={{ gap: 6 }}>
@@ -102,10 +177,10 @@ function ApprovalsSection({ state, act }: Props) {
   );
 }
 
-function AgentsSection({ state, act }: Props) {
+function AgentsSection({ state, act, onUnpublish }: Props & { onUnpublish: (id: string, name: string) => void }) {
   return (
-    <section className="section" id="agents">
-      <SectionHead idx="A2" title="Agent 上架 / 下架" />
+    <section className="section">
+      <h2 className="plain-head">助手上架 / 下架</h2>
       {state.allAgents.length === 0 ? (
         <Empty />
       ) : (
@@ -117,12 +192,11 @@ function AgentsSection({ state, act }: Props) {
                 <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
                 <Badge tone="b-cloud">{a.status}</Badge>
               </span>
-              <button
-                className={(a.status === 'published' ? 'danger' : 'ok') + ' small'}
-                onClick={() => void act.toggleAgent(a.id, a.status ?? '')}
-              >
-                {a.status === 'published' ? '下架' : '上架'}
-              </button>
+              {a.status === 'published' ? (
+                <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
+              ) : (
+                <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
+              )}
             </div>
           ))}
         </div>
@@ -135,22 +209,22 @@ function StatsSection({ state }: { state: AppState }) {
   const s = state.stats?.stats;
   if (!s) {
     return (
-      <section className="section" id="stats">
-        <SectionHead idx="A3" title="用量看板" />
+      <section className="section">
+        <h2 className="plain-head">用量</h2>
         {state.errors.stats ? <LoadError msg={state.errors.stats} /> : <Empty>加载中…</Empty>}
       </section>
     );
   }
   return (
-    <section className="section" id="stats">
-      <SectionHead idx="A3" title="用量看板" />
+    <section className="section">
+      <h2 className="plain-head">用量</h2>
       <div className="row" style={{ marginBottom: 10 }}>
         <Badge tone="b-cloud">{'任务 ' + s.totals.tasks}</Badge>
         <Badge tone="b-off">{'失败 ' + s.totals.failed}</Badge>
         <Badge tone="b-dim">{'待审批 ' + s.totals.pendingApprovals}</Badge>
       </div>
       <table>
-        <thead><tr><th>Agent</th><th className="num">总数</th><th className="num">失败</th></tr></thead>
+        <thead><tr><th>助手</th><th className="num">总数</th><th className="num">失败</th></tr></thead>
         <tbody>
           {(s.tasksByAgent || []).map((a, i) => (
             <tr key={i}><td>{a.agent}</td><td className="mono num">{a.total}</td><td className="mono num">{a.failed}</td></tr>
@@ -166,8 +240,8 @@ function StatsSection({ state }: { state: AppState }) {
 
 function QuotaSection({ state, act }: Props) {
   return (
-    <section className="section" id="quota">
-      <SectionHead idx="A4" title="配额策略" />
+    <section className="section">
+      <h2 className="plain-head">配额策略</h2>
       {state.quotas.length === 0 ? (
         <Empty>无策略</Empty>
       ) : (
@@ -198,13 +272,13 @@ function QuotaSection({ state, act }: Props) {
   );
 }
 
-function UsersSection({ state, act }: Props) {
+function UsersSection({ state, act, onDisable }: Props & { onDisable: (id: string, name: string) => void }) {
   const q = state.userFilter.toLowerCase();
   const rows = state.users.filter((u) =>
     !q || u.id.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || (u.dept || '').toLowerCase().includes(q));
   return (
-    <section className="section" id="users">
-      <SectionHead idx="A5" title="用户" hint={state.users.length + ' 人'} />
+    <section className="section">
+      <h2 className="plain-head">用户 <span className="hint">{state.users.length + ' 人'}</span></h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="筛姓名 / 部门 / id" value={state.userFilter} onChange={(e) => act.update({ userFilter: e.target.value })} />
       </div>
@@ -232,12 +306,11 @@ function UsersSection({ state, act }: Props) {
                     <span className="row" style={{ gap: 6 }}>
                       <button className="ghost small" onClick={() => act.focusUser(u.id)}>会话</button>
                       <button className="ghost small" onClick={() => void act.saveUser(u.id)}>保存</button>
-                      <button
-                        className={(u.status === 'active' ? 'danger' : 'ok') + ' small'}
-                        onClick={() => void act.setStatus(u.id, u.status === 'active' ? 'disabled' : 'active')}
-                      >
-                        {u.status === 'active' ? '禁用' : '启用'}
-                      </button>
+                      {u.status === 'active' ? (
+                        <button className="danger small" onClick={() => onDisable(u.id, u.name)}>禁用</button>
+                      ) : (
+                        <button className="ok small" onClick={() => void act.setStatus(u.id, 'active')}>启用</button>
+                      )}
                     </span>
                   </td>
                 </tr>
@@ -250,10 +323,10 @@ function UsersSection({ state, act }: Props) {
   );
 }
 
-function SessionsSection({ state, act }: Props) {
+function SessionsInvestigate({ state, act }: Props) {
   return (
-    <section className="section" id="sessions">
-      <SectionHead idx="A6" title="会话" />
+    <section className="section">
+      <h2 className="plain-head">会话与事件</h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="userId" value={state.sessUser} onChange={(e) => act.update({ sessUser: e.target.value })} />
         <input placeholder="部门（精确）" value={state.sessDept} onChange={(e) => act.update({ sessDept: e.target.value })} />
@@ -261,62 +334,61 @@ function SessionsSection({ state, act }: Props) {
         <button onClick={() => void act.loadSessions()}>检索</button>
         <button className="ghost" onClick={() => act.clearSessionFilter()}>清空</button>
       </div>
-      {state.sessions.length === 0 ? (
-        <Empty>无会话</Empty>
-      ) : (
-        <table>
-          <thead><tr><th>会话</th><th>用户</th><th>部门</th><th>Agent</th><th>状态</th><th>创建</th></tr></thead>
-          <tbody>
-            {state.sessions.map((s) => (
-              <tr
-                key={s.id}
-                className={'clickable' + (s.id === state.selectedSessionId ? ' selected' : '')}
-                onClick={() => void act.openSession(s.id)}
-              >
-                <td className="mono">{shortId(s.id)}</td>
-                <td>{s.userName || s.userId}</td>
-                <td>{s.dept || ''}</td>
-                <td className="mono">{s.agentPresetId}</td>
-                <td>{s.status}</td>
-                <td className="mono">{fmtTs(s.createdAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
-  );
-}
-
-function EventsSection({ state }: { state: AppState }) {
-  const d = state.sessionDetail;
-  return (
-    <section className="section" id="events">
-      <SectionHead idx="A7" title="会话事件摘要" />
-      {!d ? (
-        <Empty>在会话表点一行查看</Empty>
-      ) : (
+      <div className="split">
         <div>
-          <div className="detail">
-            {'会话 ' + d.session.id + ' · ' + (d.session.userId || '') + ' · ' + (d.session.agentPresetId || '') + ' · ' + (d.session.status || '')}
-          </div>
-          {d.err
-            ? <div className="msg" style={{ color: 'var(--danger)' }}>读取失败：{d.err}</div>
-            : <pre className="payload">{d.ev || '无事件'}</pre>}
+          {state.sessions.length === 0 ? (
+            <Empty>无会话</Empty>
+          ) : (
+            <table>
+              <thead><tr><th>会话</th><th>用户</th><th>部门</th><th>助手</th><th>状态</th><th>创建</th></tr></thead>
+              <tbody>
+                {state.sessions.map((s) => (
+                  <tr
+                    key={s.id}
+                    className={'clickable' + (s.id === state.selectedSessionId ? ' selected' : '')}
+                    onClick={() => void act.openSession(s.id)}
+                  >
+                    <td className="mono">{shortId(s.id)}</td>
+                    <td>{s.userName || s.userId}</td>
+                    <td>{s.dept || ''}</td>
+                    <td className="mono">{s.agentPresetId}</td>
+                    <td>{s.status}</td>
+                    <td className="mono">{fmtTs(s.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
-      )}
+        <EventsPane state={state} />
+      </div>
     </section>
   );
 }
 
-function InstancesSection({ state, act }: Props) {
+function EventsPane({ state }: { state: AppState }) {
+  const d = state.sessionDetail;
+  if (!d) return <Empty>在左侧点一行会话</Empty>;
+  return (
+    <div>
+      <div className="detail">
+        {'会话 ' + d.session.id + ' · ' + (d.session.userId || '') + ' · ' + (d.session.agentPresetId || '') + ' · ' + (d.session.status || '')}
+      </div>
+      {d.err
+        ? <div className="msg" style={{ color: 'var(--danger)' }}>读取失败：{d.err}</div>
+        : <pre className="payload">{d.ev || '无事件'}</pre>}
+    </div>
+  );
+}
+
+function InstancesSection({ state, act, onStop, onReap }: Props & { onStop: (id: string) => void; onReap: () => void }) {
   const r = state.instances;
   return (
-    <section className="section" id="instances">
-      <SectionHead idx="A8" title="实例" />
+    <section className="section">
+      <h2 className="plain-head">实例</h2>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="ghost" onClick={() => void act.loadAdminData()}>刷新</button>
-        <button className="danger" onClick={() => void act.reapIdle()}>回收空闲</button>
+        <button className="danger" onClick={onReap}>回收空闲</button>
       </div>
       {!r ? (
         state.errors.instances ? <LoadError msg={state.errors.instances} /> : <Empty>加载中…</Empty>
@@ -340,7 +412,7 @@ function InstancesSection({ state, act }: Props) {
                     <td className="mono">{i.host + ':' + i.port}</td>
                     <td><Badge tone={i.status === 'dead' ? 'b-off' : 'b-ok'}>{i.status}</Badge></td>
                     <td className="mono">{fmtTs(i.lastHeartbeat)}</td>
-                    <td>{i.status === 'dead' ? '' : <button className="danger small" onClick={() => void act.stopInstance(i.id)}>回收</button>}</td>
+                    <td>{i.status === 'dead' ? '' : <button className="danger small" onClick={() => onStop(i.id)}>回收</button>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -356,8 +428,8 @@ function RbacSection({ state, act }: Props) {
   const r = state.rbac;
   const overlays = r ? Object.entries(r.deptOverlays || {}) : [];
   return (
-    <section className="section" id="rbac">
-      <SectionHead idx="A9" title="权限（角色 → DSH 沙箱，部门覆盖优先）" />
+    <section className="section">
+      <h2 className="plain-head">权限</h2>
       <div className="msg" style={{ margin: '0 0 8px' }}>
         角色默认：员工 workspace-write；开发者/管理员 danger-full-access。新会话生效，改角色会回收旧实例。
       </div>
@@ -388,8 +460,8 @@ function RbacSection({ state, act }: Props) {
 function ModelsSection({ state }: { state: AppState }) {
   const r = state.models;
   return (
-    <section className="section" id="models">
-      <SectionHead idx="A10" title="模型配置（只读）" />
+    <section className="section">
+      <h2 className="plain-head">模型配置（只读）</h2>
       {!r ? (
         state.errors.models ? <LoadError msg={state.errors.models} /> : <Empty>加载中…</Empty>
       ) : (
@@ -401,7 +473,7 @@ function ModelsSection({ state }: { state: AppState }) {
             <Badge tone="b-private">{'私有 ' + (r.gateway.privateBaseUrl || '—') + ' ' + (r.gateway.privateModel || '')}</Badge>
           </div>
           <table>
-            <thead><tr><th>Agent</th><th>模型</th><th>提供方</th><th>路由</th></tr></thead>
+            <thead><tr><th>助手</th><th>模型</th><th>提供方</th><th>路由</th></tr></thead>
             <tbody>
               {r.agents.map((a, i) => (
                 <tr key={i}>
@@ -421,8 +493,8 @@ function ModelsSection({ state }: { state: AppState }) {
 
 function AuditSection({ state, act }: Props) {
   return (
-    <section className="section" id="audit">
-      <SectionHead idx="A11" title="审计查询" />
+    <section className="section">
+      <h2 className="plain-head">审计</h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="userId" value={state.auditUser} onChange={(e) => act.update({ auditUser: e.target.value })} />
         <input placeholder="sessionId" value={state.auditSession} onChange={(e) => act.update({ auditSession: e.target.value })} />

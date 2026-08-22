@@ -72,6 +72,8 @@ export interface Actions {
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
+  createAgent(): Promise<void>;
+  removeAgent(id: string): Promise<void>;
   openCompose(agentId: string): Promise<void>;
   closeCompose(): void;
   editComposeSpec(patch: Partial<AgentSpec>): void;
@@ -361,6 +363,23 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('操作失败：' + (e as Error).message, true); }
   }
 
+  async function createAgent() {
+    try {
+      const r = await client.admin.createAgent({ id: state.pId, name: state.pName, description: state.pDesc, basedOn: state.pBased });
+      update({ pId: '', pName: '', pDesc: '', pBased: 'assistant' });
+      await openCompose(r.agent.id);
+      notify(r.notice + '（' + r.agent.id + '）');
+    } catch (e) { notify('新建失败：' + (e as Error).message, true); }
+  }
+
+  async function removeAgent(id: string) {
+    try {
+      await client.admin.removeAgent(id);
+      await Promise.all([loadAdminData(), loadStore()]);
+      notify('已删除 ' + id);
+    } catch (e) { notify('删除失败：' + (e as Error).message, true); }
+  }
+
   async function setQuota() {
     try {
       await client.admin.setQuotaPolicy({
@@ -501,7 +520,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, setQuota, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

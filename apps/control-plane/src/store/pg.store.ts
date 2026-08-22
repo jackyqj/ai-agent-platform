@@ -288,6 +288,12 @@ export class PgStore {
     )
   }
 
+  /** 删除 Agent：先删修订（外键无 CASCADE），再删目录行。 */
+  async deleteAgentPreset(id: string): Promise<void> {
+    await this.pool!.query(`DELETE FROM agent_preset_revisions WHERE preset_id = $1`, [id])
+    await this.pool!.query(`DELETE FROM agent_presets WHERE id = $1`, [id])
+  }
+
   async listAgentPresets(): Promise<Record<string, unknown>[]> {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",

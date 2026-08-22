@@ -54,6 +54,8 @@ export interface Client {
     quotaPolicies(): Promise<{ policies: QuotaPolicy[] }>;
     setQuotaPolicy(policy: { scopeType: string; scopeId?: string; period: string; budgetRequests: number }): Promise<unknown>;
     allAgents(): Promise<{ agents: Agent[] }>;
+    createAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
+    removeAgent(id: string): Promise<{ notice: string }>;
     publishAgent(id: string, publish: boolean): Promise<unknown>;
     users(): Promise<{ users: User[] }>;
     patchUser(id: string, patch: { dept?: string; role?: string; status?: string }): Promise<unknown>;
@@ -147,6 +149,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       quotaPolicies: () => request<{ policies: QuotaPolicy[] }>('/admin/quota/policies'),
       setQuotaPolicy: (policy) => request('/admin/quota/policies', { method: 'POST', body: policy }),
       allAgents: () => request<{ agents: Agent[] }>('/admin/agents'),
+      createAgent: (body) => request<{ agent: Agent; notice: string }>('/admin/agents', { method: 'POST', body }),
+      removeAgent: (id) => request<{ notice: string }>(`/admin/agents/${id}`, { method: 'DELETE' }),
       publishAgent: (id, publish) => request(`/admin/agents/${id}/${publish ? 'publish' : 'unpublish'}`, { method: 'POST', body: {} }),
       users: () => request<{ users: User[] }>('/admin/users'),
       patchUser: (id, patch) => request(`/admin/users/${id}`, { method: 'POST', body: patch }),

@@ -399,6 +399,19 @@ export class AgentsService implements OnModuleInit {
     return this.get(id)
   }
 
+  /** 删除 Agent：删 PG 行 + 修订 + 文件 + 内存。存量会话靠 DSH standing mount 自然保留。 */
+  async removeAgent(id: string, byUserId: string): Promise<void> {
+    if (await this.persist()) {
+      await this.pg.deleteAgentPreset(id)
+    } else {
+      this.memory.delete(id)
+      this.memoryComposition.delete(id)
+      this.memoryRevisions.delete(id)
+    }
+    await this.files.remove(id)
+    this.logger.log(`removed agent ${id} by ${byUserId}`)
+  }
+
   private normalize(r: Record<string, unknown>): AgentPreset {
     return {
       id: String(r.id),

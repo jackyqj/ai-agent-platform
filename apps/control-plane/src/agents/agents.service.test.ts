@@ -188,3 +188,17 @@ test('checkDrift: 磁盘 YAML 与最新修订一致则无漂移，不一致则�
   assert.equal(drifts[0]!.drifted, true)
   assert.match(drifts[0]!.reason ?? '', /不一致/)
 })
+
+test('removeAgent: 删目录行 + 修订 + 文件（内存回退）', async () => {
+  const svc = makeService()
+  const files = (svc as unknown as { files: MemoryPresetFileStore }).files
+  await svc.publishSpec('hr-assistant', 0, 'u-admin') // 模板先发布（v1，产生修订）
+  await svc.propose({ id: 'tmp-agent', name: '临时', description: '', basedOn: 'hr-assistant' }, 'u-dev')
+  await svc.approve('tmp-agent', 'u-admin') // 写文件 + 修订
+  assert.ok(files.get('tmp-agent'), 'approve 后应有文件')
+
+  await svc.removeAgent('tmp-agent', 'u-admin')
+  assert.equal(await svc.get('tmp-agent'), undefined, '目录行删除')
+  assert.equal(files.get('tmp-agent'), undefined, '文件删除')
+  assert.deepEqual(await svc.listRevisions('tmp-agent'), [], '修订删除')
+})

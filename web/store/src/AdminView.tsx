@@ -11,6 +11,8 @@ const TABS: { id: AdminPane; label: string; hash: string }[] = [
   { id: 'investigate', label: '调查', hash: '#admin/investigate' },
 ];
 
+const PRESETS = ['assistant', 'hr-assistant', 'report-builder', 'doc-search'];
+
 const ROLES = ['employee', 'developer', 'admin'];
 const PERMS = ['read-only', 'workspace-write', 'danger-full-access'];
 
@@ -22,6 +24,7 @@ interface Props {
 type Pending =
   | { kind: 'disable'; id: string; name: string }
   | { kind: 'unpublish'; id: string; name: string }
+  | { kind: 'delete'; id: string; name: string }
   | { kind: 'stop'; id: string }
   | { kind: 'reap' };
 
@@ -44,6 +47,9 @@ export default function AdminView({ state, act }: Props) {
         break;
       case 'unpublish':
         void act.toggleAgent(pending.id, 'published');
+        break;
+      case 'delete':
+        void act.removeAgent(pending.id);
         break;
       case 'stop':
         void act.stopInstance(pending.id);
@@ -98,7 +104,7 @@ export default function AdminView({ state, act }: Props) {
       ) : null}
       {pane === 'config' ? (
         <>
-          <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} />
+          <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} onRemove={(id, name) => setPending({ kind: 'delete', id, name })} />
           <QuotaSection state={state} act={act} />
           <RbacSection state={state} act={act} />
           <ModelsSection state={state} />
@@ -121,6 +127,8 @@ function confirmBody(p: Pending): string {
       return `禁用 ${p.name} 会立即回收该用户的实例。`;
     case 'unpublish':
       return `下架「${p.name}」后，新会话将无法选用。存量会话不受影响。`;
+    case 'delete':
+      return `删除「${p.name}」会清掉定义与 preset 文件，新会话不可选。存量会话靠 DSH 保留。`;
     case 'stop':
       return '回收该实例会断开用户当前对话。';
     case 'reap':
@@ -138,6 +146,8 @@ function confirmLabel(p: Pending): string {
       return '确认禁用';
     case 'unpublish':
       return '确认下架';
+    case 'delete':
+      return '确认删除';
     case 'stop':
       return '确认回收';
     case 'reap':
@@ -180,10 +190,21 @@ function ApprovalsSection({ state, act }: Props) {
   );
 }
 
-function AgentsSection({ state, act, onUnpublish }: Props & { onUnpublish: (id: string, name: string) => void }) {
+function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpublish: (id: string, name: string) => void; onRemove: (id: string, name: string) => void }) {
   return (
     <section className="section">
-      <h2 className="plain-head">助手上架 / 下架</h2>
+      <h2 className="plain-head">Agent 管理</h2>
+
+      <div className="row" style={{ marginBottom: 10 }}>
+        <input placeholder="id（如 hr-flow）" value={state.pId} style={{ minWidth: 110 }} onChange={(e) => act.update({ pId: e.target.value })} />
+        <input placeholder="名称" value={state.pName} style={{ minWidth: 110 }} onChange={(e) => act.update({ pName: e.target.value })} />
+        <input placeholder="一句话描述" value={state.pDesc} style={{ flex: 1 }} onChange={(e) => act.update({ pDesc: e.target.value })} />
+        <select value={state.pBased} onChange={(e) => act.update({ pBased: e.target.value })}>
+          {PRESETS.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <button className="ok" onClick={() => void act.createAgent()}>新建</button>
+      </div>
+
       {state.allAgents.length === 0 ? (
         <Empty />
       ) : (
@@ -202,6 +223,7 @@ function AgentsSection({ state, act, onUnpublish }: Props & { onUnpublish: (id: 
                 ) : (
                   <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
                 )}
+                <button className="danger small" onClick={() => onRemove(a.id, a.name)}>删除</button>
               </span>
             </div>
           ))}

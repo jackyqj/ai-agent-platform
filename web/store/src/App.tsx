@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { API_HOST_DISPLAY, parseLocation, useApp, type Actions } from './useApp';
+import { applyTheme, readTheme, writeTheme, type Theme } from './theme';
 import StoreView from './StoreView';
 import AdminView from './AdminView';
 import ChatView from './ChatView';
@@ -42,6 +43,21 @@ export default function App({ client }: { client?: Client }) {
   );
 }
 
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const toggle = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    writeTheme(next);
+    applyTheme(next);
+  };
+  return (
+    <button className="ghost theme-toggle" onClick={toggle} title="切换亮/暗主题">
+      {theme === 'dark' ? '☀ 亮色' : '🌙 暗色'}
+    </button>
+  );
+}
+
 function Topbar({ isAdmin, route, state, act }: { isAdmin: boolean; route: string; state: AppState; act: Actions }) {
   const go = (key: 'store' | 'admin', label: string) => (
     <a
@@ -71,6 +87,7 @@ function Topbar({ isAdmin, route, state, act }: { isAdmin: boolean; route: strin
           {go('admin', '管理')}
         </nav>
       ) : null}
+      <ThemeToggle />
       {state.me ? (
         <div className="who">
           <span>{state.me.name}</span>

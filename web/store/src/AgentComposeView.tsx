@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { type Actions } from './useApp';
 import { Badge, Empty } from './ui';
 import { fmtTs } from './util';
@@ -7,6 +8,7 @@ import type { AppState, CapabilityCatalog, ComposeState } from './types';
 // 左栏能力目录（只读）、中栏编排表单、右栏 YAML 只读预览 + 校验错误。
 export default function AgentComposeView({ state, act }: { state: AppState; act: Actions }) {
   const c = state.compose;
+  const [showPreview, setShowPreview] = useState(true);
   if (!c || !c.spec) return <Empty>加载中…</Empty>;
   const spec = c.spec;
   const cat = c.catalog;
@@ -25,6 +27,9 @@ export default function AgentComposeView({ state, act }: { state: AppState; act:
       <div className="row" style={{ marginBottom: 12, gap: 8 }}>
         <button className="ghost" onClick={() => act.closeCompose()}>← 返回</button>
         <button className="ghost" onClick={() => void act.refreshComposePreview()}>预览</button>
+        {!showPreview ? (
+          <button className="ghost" onClick={() => setShowPreview(true)}>展开预览</button>
+        ) : null}
         <button onClick={() => void act.saveComposeSpec()} disabled={c.saving}>{c.saving ? '…' : '保存草稿'}</button>
         <button className="ok" onClick={() => void act.publishCompose()} disabled={c.publishing || c.issues.length > 0}>
           {c.publishing ? '…' : '发布'}
@@ -32,7 +37,7 @@ export default function AgentComposeView({ state, act }: { state: AppState; act:
         {c.issues.length > 0 ? <span className="hint" style={{ color: 'var(--danger)' }}>{'校验未通过 ' + c.issues.length + ' 项'}</span> : null}
       </div>
 
-      <div className="compose-grid">
+      <div className={'compose-grid' + (showPreview ? '' : ' collapsed')}>
         <aside className="card">
           <h2 className="plain-head">能力目录</h2>
           <CapabilityCatalogPane cat={cat} />
@@ -43,15 +48,20 @@ export default function AgentComposeView({ state, act }: { state: AppState; act:
           <SpecForm spec={spec} act={act} cat={cat} />
         </section>
 
-        <aside className="card">
-          <h2 className="plain-head">YAML 预览（只读）</h2>
-          {c.issues.length > 0 ? (
-            <div className="msg" style={{ color: 'var(--danger)' }}>
-              {c.issues.map((i) => <div key={i.path}>{i.path}: {i.message}</div>)}
+        {showPreview ? (
+          <aside className="card">
+            <div className="compose-pane-head">
+              <h2 className="plain-head">YAML 预览（只读）</h2>
+              <button className="ghost small" onClick={() => setShowPreview(false)}>收起</button>
             </div>
-          ) : null}
-          <pre className="payload">{c.previewYaml}</pre>
-        </aside>
+            {c.issues.length > 0 ? (
+              <div className="msg" style={{ color: 'var(--danger)' }}>
+                {c.issues.map((i) => <div key={i.path}>{i.path}: {i.message}</div>)}
+              </div>
+            ) : null}
+            <pre className="payload">{c.previewYaml}</pre>
+          </aside>
+        ) : null}
       </div>
 
       <RevisionsSection c={c} act={act} />

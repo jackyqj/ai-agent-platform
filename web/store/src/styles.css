@@ -36,6 +36,46 @@
   --radius-sm: 6px;
 }
 
+/* ── 亮色主题（html[data-theme="light"]，顶栏开关切换）──────────────────
+   只覆盖结构/文字/边框变量，accent 等品牌色沿用：按钮、徽章、焦点环不变。 */
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6fa;
+  --bg-raise: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eef1f6;
+  --border: #dfe3eb;
+  --border-strong: #c9d0dc;
+  --text: #1c2230;
+  --text-dim: #5b6472;
+  --text-faint: #8a93a3;
+  /* accent 在亮色下加深：链接/导航高亮/banner.ok/按钮 hover 都以
+     --accent-strong 作文字或背景，浅色值在亮底上不可读，统一换深青。 */
+  --accent: #17a08f;
+  --accent-strong: #0e8a7b;
+  --accent-dim: rgba(17, 146, 131, 0.12);
+  --accent-border: rgba(17, 146, 131, 0.45);
+}
+html[data-theme="light"] .confirm { background: #fff4d6; border-color: #e0c26b; color: #6b5210; }
+html[data-theme="light"] .banner.warn { background: #fff4d6; color: #8a6d1a; }
+html[data-theme="light"] .toast.err { color: var(--danger); }
+
+/* ── 亮色徽章：暗色 chips → 同色系的浅底深字 ── */
+html[data-theme="light"] .b-private { background: #f3ead2; color: #8a5f00; }
+html[data-theme="light"] .b-warn { background: #fdf3d6; color: #8a6d1a; }
+html[data-theme="light"] .b-cloud { background: #e3f0fb; color: #1f6fb2; }
+html[data-theme="light"] .b-self { background: #efe6fa; color: #8648c9; }
+html[data-theme="light"] .b-none { background: #e7ebf1; color: #5b6472; }
+html[data-theme="light"] .b-ok { background: #e2f6ea; color: #1e7a49; }
+html[data-theme="light"] .b-off { background: #fbe7e6; color: #bf3a2f; }
+
+/* ── 亮色按钮 / 导航高亮 ── */
+html[data-theme="light"] button.ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text-dim); }
+html[data-theme="light"] button.ghost:hover { color: var(--text); border-color: var(--accent-border); }
+html[data-theme="light"] .nav a.active { color: var(--accent-strong); }
+html[data-theme="light"] .indexbar a.active { color: var(--accent-strong); }
+/* banner.ok 用 accent-dim 底 + accent-strong 字，亮色下已因变量加深而可读 */
+
 * { box-sizing: border-box; }
 
 html { color-scheme: dark; }
@@ -103,9 +143,9 @@ code, .mono, pre, .token { font-family: var(--mono); font-size: 0.92em; letter-s
 .section { margin-bottom: 28px; scroll-margin-top: 118px; }
 .section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .section-head .idx { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.1em; }
-.section-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: #e4e8ee; }
+.section-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
 .section-head .hint { margin-left: auto; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
-.plain-head { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: #e4e8ee; }
+.plain-head { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); }
 .plain-head .hint { margin-left: 8px; font-size: 12px; color: var(--text-faint); font-weight: 400; font-family: var(--mono); }
 
 /* ── cards ─────────────────────────────────────────────── */
@@ -137,6 +177,7 @@ code, .mono, pre, .token { font-family: var(--mono); font-size: 0.92em; letter-s
 }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .b-private { background: #3a2d12; color: var(--private); }
+.b-warn { background: #3a2d12; color: var(--warn); }
 .b-cloud { background: #14324d; color: var(--cloud); }
 .b-self { background: #2d1a3a; color: var(--self); }
 .b-none { background: #1d2733; color: #8fa3ba; }
@@ -198,6 +239,7 @@ button.ghost:hover { color: var(--text); border-color: var(--accent-border); bac
 button.danger { background: var(--danger); color: #fff; }
 button.ok { background: var(--ok); color: #06160e; }
 button.small { padding: 4px 10px; font-size: 12px; }
+button.theme-toggle { border-radius: 20px; font-size: 12px; white-space: nowrap; }
 
 /* ── tables ────────────────────────────────────────────── */
 
@@ -301,6 +343,7 @@ pre.payload {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 10px; overflow-x: auto;
   font-size: 11.5px; color: var(--text-dim); margin: 0;
+  white-space: pre-wrap; word-break: break-word;
 }
 
 @media (max-width: 640px) {
@@ -314,13 +357,20 @@ pre.payload {
 
 .compose-grid {
   display: grid;
-  grid-template-columns: 220px 1fr 1fr;
+  grid-template-columns: 220px minmax(0, 1.5fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
   margin-bottom: 14px;
 }
+/* 防止右栏 YAML 长行把它的 1fr 轨道撑大、挤窄中栏表单；
+   min-width 0 允许轨道收缩到内容最小宽度以下，pre 靠 overflow-x 滚动。 */
+.compose-grid > * { min-width: 0; }
+/* 收起 YAML 预览后，表单占满剩余宽度 */
+.compose-grid.collapsed { grid-template-columns: 220px minmax(0, 1fr); }
+.compose-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.compose-pane-head .plain-head { margin-bottom: 0; }
 @media (max-width: 1000px) {
-  .compose-grid { grid-template-columns: 1fr; }
+  .compose-grid, .compose-grid.collapsed { grid-template-columns: 1fr; }
 }
 .compose-grid .card { margin-bottom: 0; }
 
@@ -328,10 +378,28 @@ pre.payload {
   margin: 12px 0 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #9aa4b2;
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: .04em;
 }
 
 .form label { display: block; margin: 12px 0 4px; font-size: 12px; color: var(--text-dim); }
-.form input, .form select, .form textarea { width: 100%; }
+.form input:not([type="checkbox"]), .form select, .form textarea { width: 100%; }
+/* checkbox 类输入：还原为原生小框——全局 input 的 padding/border/background
+   会让它渲染成文本输入框样式的圆角大方块，这里是乱的根源。 */
+.form input[type="checkbox"] {
+  appearance: auto;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* checkbox 行：恢复 flex（.form label 的 display:block 会盖过 .row），
+   收紧上边距、checkbox 与文字垂直居中，长标签换行时 checkbox 随首行居中。 */
+.form label.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--text); }
+.form label.row > .hint { color: var(--text-faint); }

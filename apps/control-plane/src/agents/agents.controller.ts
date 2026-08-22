@@ -1,5 +1,5 @@
 // Agent 商店 API（12 工单）+ 编排 API（agent-orchestration-design.md §8）
-import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
@@ -36,6 +36,34 @@ export class AgentsController {
   @RequirePermission('agent.publish')
   async all() {
     return { agents: await this.agents.list() }
+  }
+
+  /** 管理员新建：基于模板复制已发布 spec 成草稿（免批准，可直接编排） */
+  @Post('admin/agents')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async create(@Req() req: { user: { sub: string } }, @Body() body: { id: string; name: string; description: string; basedOn?: string }) {
+    try {
+      const a = await this.agents.propose(
+        { id: body.id, name: body.name, description: body.description ?? '', basedOn: body.basedOn ?? 'assistant' },
+        req.user.sub,
+      )
+      return { agent: a, notice: '已创建草稿，可进入编排' }
+    } catch (e) {
+      if (e instanceof TemplateHasNoSpecError) {
+        throw new HttpException(e.message, HttpStatus.UNPROCESSABLE_ENTITY)
+      }
+      throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
+    }
+  }
+
+  /** 删除 Agent：删 PG 行 + 修订 + preset 文件（存量会话靠 DSH standing mount 保留） */
+  @Delete('admin/agents/:id')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async remove(@Req() req: { user: { sub: string } }, @Param('id') id: string) {
+    await this.agents.removeAgent(id, req.user.sub)
+    return { notice: '已删除' }
   }
 
   // ── 编排 API（agent-orchestration-design.md §8）──

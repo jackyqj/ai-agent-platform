@@ -176,7 +176,9 @@ function ApprovalsSection({ state, act }: Props) {
               <tr key={a.id}>
                 <td className="mono">{shortId(a.requesterUserId)}</td>
                 <td>{a.action}</td>
-                <td className="mono">{a.level}</td>
+                <td className="mono">
+                  {a.chain && a.chain.length > 1 ? `manager ${(a.currentLevel ?? 0) + 1}/${a.chain.length} → ${a.chain[(a.currentLevel ?? 0)]}` : a.level}
+                </td>
                 <td>
                   <span className="row" style={{ gap: 6 }}>
                     <button className="ok small" onClick={() => void act.decide(a.id, true)}>批准</button>
@@ -193,6 +195,7 @@ function ApprovalsSection({ state, act }: Props) {
 }
 
 function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpublish: (id: string, name: string) => void; onRemove: (id: string, name: string) => void }) {
+  const [chainDrafts, setChainDrafts] = useState<Record<string, string>>({});
   return (
     <section className="section">
       <h2 className="plain-head">Agent 管理</h2>
@@ -211,24 +214,36 @@ function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpubl
         <Empty />
       ) : (
         <div>
-          {state.allAgents.map((a) => (
-            <div key={a.id} className="row" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-              <span>
-                {a.name}
-                <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
-                <Badge tone="b-cloud">{a.status}</Badge>
-              </span>
-              <span className="row" style={{ gap: 6 }}>
-                <button className="ghost small" onClick={() => void act.openCompose(a.id)}>编排</button>
-                {a.status === 'published' ? (
-                  <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
-                ) : (
-                  <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
-                )}
-                <button className="danger small" onClick={() => onRemove(a.id, a.name)}>删除</button>
-              </span>
-            </div>
-          ))}
+          {state.allAgents.map((a) => {
+            const draft = chainDrafts[a.id] ?? (a.approvalChain?.join(',') || '');
+            return (
+              <div key={a.id} className="row" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                <span>
+                  {a.name}
+                  <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
+                  <Badge tone="b-cloud">{a.status}</Badge>
+                </span>
+                <span className="row" style={{ gap: 6 }}>
+                  <span className="row" style={{ gap: 4 }}>
+                    <input
+                      placeholder="审批链（逗号分隔角色，如 developer,admin）"
+                      value={draft}
+                      style={{ maxWidth: 180, minWidth: 130 }}
+                      onChange={(e) => setChainDrafts((m) => ({ ...m, [a.id]: e.target.value }))}
+                    />
+                    <button className="ghost small" onClick={() => void act.setAgentChain(a.id, draft.split(',').map((s) => s.trim()).filter(Boolean))}>链</button>
+                  </span>
+                  <button className="ghost small" onClick={() => void act.openCompose(a.id)}>编排</button>
+                  {a.status === 'published' ? (
+                    <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
+                  ) : (
+                    <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
+                  )}
+                  <button className="danger small" onClick={() => onRemove(a.id, a.name)}>删除</button>
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

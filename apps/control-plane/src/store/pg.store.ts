@@ -302,7 +302,7 @@ export class PgStore {
   async listAgentPresets(): Promise<Record<string, unknown>[]> {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",
-              approval_level AS "approvalLevel", status, version
+              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version
        FROM agent_presets ORDER BY version DESC`,
     )
     return res.rows
@@ -311,7 +311,7 @@ export class PgStore {
   async getAgentPreset(id: string) {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",
-              approval_level AS "approvalLevel", status, version
+              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version
        FROM agent_presets WHERE id = $1`,
       [id],
     )
@@ -320,6 +320,17 @@ export class PgStore {
 
   async updateAgentPresetStatus(id: string, status: string): Promise<void> {
     await this.pool!.query(`UPDATE agent_presets SET status = $2 WHERE id = $1`, [id, status])
+  }
+
+  /** 多级审批（14）：读取某 Agent 的审批链（编排外管理配置）；NULL=默认 ['admin'] */
+  async getAgentApprovalChain(id: string): Promise<string[]> {
+    const res = await this.pool!.query(`SELECT approval_chain AS "chain" FROM agent_presets WHERE id = $1`, [id])
+    const chain = res.rows[0]?.chain
+    return Array.isArray(chain) ? chain.map(String) : []
+  }
+
+  async setAgentApprovalChain(id: string, roles: string[]): Promise<void> {
+    await this.pool!.query(`UPDATE agent_presets SET approval_chain = $2 WHERE id = $1`, [id, JSON.stringify(roles)])
   }
 
   async updateAgentPresetVisibility(id: string, visibility: unknown): Promise<void> {
@@ -440,18 +451,20 @@ export class PgStore {
   async insertApproval(a: {
     id: string; requesterUserId: string; taskId?: string; agentPresetId: string
     action: string; level: string; status: string; expiresAt?: string
+    chain?: string[]; currentLevel?: number
   }): Promise<void> {
     await this.pool!.query(
-      `INSERT INTO approval_requests (id, requester_user_id, task_id, agent_preset_id, action, level, status, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [a.id, a.requesterUserId, a.taskId ?? null, a.agentPresetId, a.action, a.level, a.status, a.expiresAt ?? null],
+      `INSERT INTO approval_requests (id, requester_user_id, task_id, agent_preset_id, action, level, status, expires_at, chain, current_level)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [a.id, a.requesterUserId, a.taskId ?? null, a.agentPresetId, a.action, a.level, a.status, a.expiresAt ?? null, JSON.stringify(a.chain ?? []), a.currentLevel ?? 0],
     )
   }
 
   async getApproval(id: string) {
     const res = await this.pool!.query(
       `SELECT id, requester_user_id AS "requesterUserId", task_id AS "taskId", agent_preset_id AS "agentPresetId",
-              action, level, status, decided_by AS "decidedBy", decided_at AS "decidedAt",
+              action, level, status, chain, current_level AS "currentLevel",
+              decided_by AS "decidedBy", decided_at AS "decidedAt",
               expires_at AS "expiresAt", created_at AS "createdAt"
        FROM approval_requests WHERE id = $1`,
       [id],
@@ -467,7 +480,8 @@ export class PgStore {
     args.push(filter.limit)
     const res = await this.pool!.query(
       `SELECT id, requester_user_id AS "requesterUserId", task_id AS "taskId", agent_preset_id AS "agentPresetId",
-              action, level, status, decided_by AS "decidedBy", decided_at AS "decidedAt",
+              action, level, status, chain, current_level AS "currentLevel",
+              decided_by AS "decidedBy", decided_at AS "decidedAt",
               expires_at AS "expiresAt", created_at AS "createdAt"
        FROM approval_requests ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
        ORDER BY created_at DESC LIMIT $${args.length}`,
@@ -476,11 +490,11 @@ export class PgStore {
     return res.rows
   }
 
-  async updateApproval(id: string, p: { status: string; decidedBy: string }): Promise<void> {
-    await this.pool!.query(
-      `UPDATE approval_requests SET status = $2, decided_by = $3, decided_at = now() WHERE id = $1`,
-      [id, p.status, p.decidedBy],
-    )
+  async updateApproval(id: string, p: { status: string; decidedBy: string; currentLevel?: number }): Promise<void> {
+    const sets: string[] = [`status = $2`, `decided_by = $3`, `decided_at = now()`]
+    const args: unknown[] = [id, p.status, p.decidedBy]
+    if (p.currentLevel !== undefined) { args.push(p.currentLevel); sets.push(`current_level = $${args.length}`) }
+    await this.pool!.query(`UPDATE approval_requests SET ${sets.join(', ')} WHERE id = $1`, args)
   }
 
   /** 授权存储：同一 requester+preset+action 在有效期内有 approved 记录（记住 X 小时） */

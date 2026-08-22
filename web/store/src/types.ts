@@ -48,6 +48,7 @@ export interface Agent {
   description: string;
   modelRoute?: ModelRoute;
   approvalLevel?: string;
+  approvalChain?: string[];
   status?: string;
 }
 
@@ -56,6 +57,8 @@ export interface Approval {
   requesterUserId: string;
   action: string;
   level: string;
+  chain?: string[];
+  currentLevel?: number;
 }
 
 export interface QuotaPolicy {

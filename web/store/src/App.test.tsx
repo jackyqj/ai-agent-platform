@@ -61,6 +61,7 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
       roles: vi.fn(async () => ({ roles: [] })),
       upsertRole: vi.fn(async () => ({ ok: true, roles: [] })),
       removeRole: vi.fn(async () => ({ ok: true, roles: [] })),
+      setApprovalChain: vi.fn(async () => ({ roles: [] })),
     },
     ...overrides,
   };

@@ -103,6 +103,7 @@ export interface Actions {
   setRoleForm(patch: Partial<AppState['roleForm']>): void;
   upsertRole(): Promise<void>;
   removeRole(name: string): Promise<void>;
+  setAgentChain(id: string, roles: string[]): Promise<void>;
   focusUser(id: string): void;
   editUser(id: string, patch: { dept?: string; role?: string }): void;
   saveUser(id: string): Promise<void>;
@@ -501,6 +502,14 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('删除失败：' + (e as Error).message, true); }
   }
 
+  async function setAgentChain(id: string, roles: string[]) {
+    try {
+      await client.admin.setApprovalChain(id, roles);
+      notify('已保存审批链');
+      await loadAdminData();
+    } catch (e) { notify('保存审批链失败：' + (e as Error).message, true); }
+  }
+
   function focusUser(id: string) {
     update({ sessUser: id, sessDept: '', auditUser: id });
     fetchSessions({ userId: id, dept: '', from: undefined }).catch((e) => notify('检索失败：' + (e as Error).message, true));
@@ -628,7 +637,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, setRoleForm, upsertRole, removeRole, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,

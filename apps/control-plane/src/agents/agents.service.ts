@@ -183,6 +183,12 @@ export class AgentsService implements OnModuleInit {
     return this.get(id)
   }
 
+  /** 多级审批（14）：为 Agent 配置有序审批链（角色名数组；空/缺省则默认 ['admin']） */
+  async setApprovalChain(id: string, roles: string[]): Promise<string[]> {
+    await this.pg.setAgentApprovalChain(id, roles)
+    return this.pg.getAgentApprovalChain(id)
+  }
+
   // ── 编排（agent-orchestration-design.md §8）───────────────────
 
   capabilities(): CapabilityCatalog {

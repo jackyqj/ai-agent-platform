@@ -32,11 +32,11 @@ export class ApprovalsController {
   @Post('admin/approvals/:id/decide')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('approval.decide')
-  async decide(@Req() req: { user: { sub: string } }, @Param('id') id: string, @Body() body: { approve: boolean }) {
+  async decide(@Req() req: { user: { sub: string; role: string } }, @Param('id') id: string, @Body() body: { approve: boolean }) {
     try {
-      const a = await this.approvals.decide(id, body.approve === true, req.user.sub, (taskId) => this.tasks.enqueue(taskId))
+      const a = await this.approvals.decide(id, body.approve === true, req.user.sub, req.user.role, (taskId) => this.tasks.enqueue(taskId))
       if (!a) throw new HttpException('approval not found', HttpStatus.NOT_FOUND)
-      return { approval: a, notice: body.approve ? '已批准，关联任务将入队执行' : '已拒绝' }
+      return { approval: a, notice: body.approve ? '已批准' : '已拒绝' }
     } catch (e) {
       throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
     }

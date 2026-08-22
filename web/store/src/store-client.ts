@@ -83,6 +83,7 @@ export interface Client {
     roles(): Promise<{ roles: RoleDef[] }>;
     upsertRole(body: { name: string; permissions: string[]; dshPreset: string }): Promise<{ ok: boolean; roles: RoleDef[] }>;
     removeRole(name: string): Promise<{ ok: boolean; roles: RoleDef[] }>;
+    setApprovalChain(id: string, roles: string[]): Promise<{ roles: string[] }>;
   };
 }
 
@@ -193,6 +194,7 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       roles: () => request<{ roles: RoleDef[] }>('/admin/roles'),
       upsertRole: (body) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles', { method: 'POST', body }),
       removeRole: (name) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles/' + encodeURIComponent(name), { method: 'DELETE' }),
+      setApprovalChain: (id, roles) => request<{ roles: string[] }>('/admin/agents/' + id + '/approval-chain', { method: 'PUT', body: { roles } }),
     },
   };
 }

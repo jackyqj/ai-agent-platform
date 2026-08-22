@@ -3,6 +3,7 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post, 
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
+import { AuditStore } from '../common/audit.store.js'
 import { RolesService } from '../common/roles.service.js'
 import { AgentsService, SpecValidationError, TemplateHasNoSpecError, type AgentPreset } from './agents.service.js'
 import type { AgentSpec } from './types.js'
@@ -12,6 +13,7 @@ export class AgentsController {
   constructor(
     private readonly agents: AgentsService,
     private readonly roles: RolesService,
+    private readonly audit: AuditStore,
   ) {}
 
   /** 员工视角：可见的已上架 Agent */
@@ -169,6 +171,24 @@ export class AgentsController {
     const a = await this.agents.setVisibility(id, { roles: body.roles, departments: body.departments })
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
     return { agent: a }
+  }
+
+  /** 多级审批（14）：Agent 的有序审批链（角色名数组；每级角色必须具 approval.decide 能力，避免死链） */
+  @Put('admin/agents/:id/approval-chain')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async approvalChain(@Req() req: { user: { sub: string } }, @Param('id') id: string, @Body() body: { roles?: string[] }) {
+    const a = await this.agents.get(id)
+    if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+    const chain = (body.roles ?? []).map((r) => r.trim()).filter(Boolean)
+    for (const r of chain) {
+      if (!this.roles.can(r, 'approval.decide')) {
+        throw new HttpException(`审批链角色「${r}」无审批权限（approval.decide），无法作为审批层`, HttpStatus.BAD_REQUEST)
+      }
+    }
+    const roles = await this.agents.setApprovalChain(id, chain)
+    await this.audit.append({ userId: req.user.sub, eventType: 'admin.agent.approval_chain', payload: { id, roles } })
+    return { roles }
   }
 
   /** 修订列表 */

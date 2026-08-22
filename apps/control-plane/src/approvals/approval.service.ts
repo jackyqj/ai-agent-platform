@@ -1,6 +1,7 @@
-// 审批服务（14 工单）：授权存储 + 任务前置审批门
+// 审批服务（14 工单）：授权存储 + 任务前置审批门 + 多级审批（有序审批链）
 // 语义：preset 的 approvalLevel = none → 免审批；self → 近期授权命中直接放行（记住 X 小时），否则建 pending；
-// manager → 必须 manager/admin 审批。审批通过 → 关联任务入队。
+// manager → 按审批链逐个角色审批（默认 ['admin']，可从 agent_presets.approval_chain 配置为多级）。
+// 全链通过 → 关联任务入队。decide 校验当前层级审批人角色。
 import { Injectable, Logger } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { PgStore } from '../store/pg.store.js'
@@ -16,6 +17,8 @@ export interface ApprovalRequest {
   action: string
   level: 'self' | 'manager'
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  chain?: string[]
+  currentLevel?: number
   decidedBy?: string
   decidedAt?: string
   expiresAt?: string
@@ -41,6 +44,20 @@ export class ApprovalService {
     return Number(process.env.CP_GRANT_HOURS ?? 24)
   }
 
+  private defaultChain(): string[] {
+    return ['admin']
+  }
+
+  /** 实际生效的审批链：请求快照链有则用，否则默认 ['admin'] */
+  private effectiveChain(a: ApprovalRequest): string[] {
+    return a.chain?.length ? a.chain : this.defaultChain()
+  }
+
+  /** 某角色是否可审批当前层级：等于该层级要求角色，或 admin（后台超管可任一层级） */
+  private canDecideLevel(deciderRole: string, levelRole: string): boolean {
+    return deciderRole === levelRole || deciderRole === 'admin'
+  }
+
   /**
    * 任务前置审批门：返回 'granted'（直接入队）或 pending 审批单（任务等待）
    * 由 TasksService.submit 调用；审批通过后经 enqueueAfterApproval 入队。
@@ -61,6 +78,10 @@ export class ApprovalService {
       if (granted) return { granted: true }
     }
 
+    // manager：构建审批链（默认 ['admin']；可配置多级）。把链快照到请求上，前端据此展示层级。
+    const chain = level === 'manager'
+      ? await this.approvalChainOf(agentPresetId)
+      : undefined
     const approval: ApprovalRequest = {
       id: randomUUID(),
       requesterUserId,
@@ -69,10 +90,12 @@ export class ApprovalService {
       action,
       level: level === 'manager' ? 'manager' : 'self',
       status: 'pending',
+      chain,
+      currentLevel: 0,
       createdAt: new Date().toISOString(),
     }
     if (this.persist()) {
-      await this.pg.insertApproval(approval)
+      await this.pg.insertApproval({ id: approval.id, requesterUserId: approval.requesterUserId, taskId, agentPresetId, action: approval.action, level: approval.level, status: approval.status, chain: approval.chain, currentLevel: approval.currentLevel })
     } else {
       this.memory.set(approval.id, approval)
     }
@@ -80,21 +103,50 @@ export class ApprovalService {
     return { granted: false, approval }
   }
 
-  async decide(id: string, approve: boolean, decidedBy: string, enqueue: (taskId: string) => Promise<void>): Promise<ApprovalRequest | undefined> {
+  /** 审批链来源：agent_presets.approval_chain（管理员配置），无则默认 ['admin'] */
+  private async approvalChainOf(agentPresetId: string): Promise<string[]> {
+    if (!this.persist()) return this.defaultChain()
+    const chain = await this.pg.getAgentApprovalChain(agentPresetId).catch(() => [] as string[])
+    return chain.length ? chain : this.defaultChain()
+  }
+
+  async decide(id: string, approve: boolean, decidedBy: string, deciderRole: string, enqueue: (taskId: string) => Promise<void>): Promise<ApprovalRequest | undefined> {
     const a = await this.get(id)
     if (!a) return undefined
     if (a.status !== 'pending') throw new Error(`approval already ${a.status}`)
-    const status = approve ? 'approved' : 'rejected'
-    if (this.persist()) {
-      await this.pg.updateApproval(id, { status, decidedBy })
-    } else {
-      a.status = status
-      a.decidedBy = decidedBy
-      a.decidedAt = new Date().toISOString()
+
+    const chain = this.effectiveChain(a)
+    const levelIdx = a.currentLevel ?? 0
+    const levelRole = chain[levelIdx] ?? 'admin'
+    if (approve && !this.canDecideLevel(deciderRole, levelRole)) {
+      throw new Error(`当前层级需 ${levelRole} 审批（你的角色 ${deciderRole} 不满足）`)
     }
-    await this.audit.append({ userId: decidedBy, eventType: `approval.${status}`, payload: { approvalId: id, agentPresetId: a.agentPresetId } })
-    if (approve && a.taskId) {
-      await enqueue(a.taskId) // 审批通过 → 任务入队
+
+    if (approve) {
+      const isLast = levelIdx >= chain.length - 1
+      const nextLevel = isLast ? levelIdx : levelIdx + 1
+      const status = isLast ? 'approved' : 'pending'
+      if (this.persist()) {
+        await this.pg.updateApproval(id, { status, decidedBy, currentLevel: nextLevel })
+      } else {
+        a.status = status
+        a.decidedBy = decidedBy
+        a.decidedAt = new Date().toISOString()
+        a.currentLevel = nextLevel
+      }
+      await this.audit.append({ userId: decidedBy, eventType: `approval.${isLast ? 'approved' : 'advanced'}`, payload: { approvalId: id, agentPresetId: a.agentPresetId, level: levelIdx + 1, total: chain.length } })
+      if (isLast && a.taskId) {
+        await enqueue(a.taskId) // 全链通过 → 任务入队
+      }
+    } else {
+      if (this.persist()) {
+        await this.pg.updateApproval(id, { status: 'rejected', decidedBy })
+      } else {
+        a.status = 'rejected'
+        a.decidedBy = decidedBy
+        a.decidedAt = new Date().toISOString()
+      }
+      await this.audit.append({ userId: decidedBy, eventType: 'approval.rejected', payload: { approvalId: id, agentPresetId: a.agentPresetId } })
     }
     return this.get(id)
   }
@@ -103,7 +155,7 @@ export class ApprovalService {
     if (this.persist()) {
       try {
         const row = await this.pg.getApproval(id)
-        if (row) return row
+        if (row) return row as unknown as ApprovalRequest
       } catch (e) {
         this.logger.error(`PG getApproval failed: ${(e as Error).message}`)
       }

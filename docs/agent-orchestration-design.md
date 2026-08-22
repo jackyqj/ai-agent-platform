@@ -274,7 +274,7 @@ POST publish（先 PG 提交、后写文件——文件系统非事务，见下�
 不做 YAML → AgentSpec 反编译。现网 YAML 对不上薄 spec，persona 还挂在 `dsh-system-prompt` 上。
 
 1. 按 §4.2 手写 4 份种子 spec，写入 `composition`（P1 迁移或种子脚本）。
-2. 第一次 publish 将 YAML 从 `dsh-system-prompt.config.persona` 换成 `dsh-persona`。理由：`dsh-system-prompt` 是全局 `deployment:persona` 的 owner（process 唯一，README 明说 *"a process has exactly one"*），在 preset scope 里挂它做 per-agent 覆盖是可疑用法；`dsh-persona` 才是专门用来 shadow 部署 persona 的插件（README：*"shadow the deployment persona"*）。**迁移前先验证现网 4 个 preset 的 persona 是否真的 shadow 了全局 persona**——若未生效，则本次替换是 bugfix（修复 per-agent 身份）而非仅行为变更；无论哪种，产出 diff 都需评审确认 scope 遮蔽仍覆盖 host patch 的默认 persona。
+2. 第一次 publish 将 YAML 从 `dsh-system-prompt.config.persona` 换成 `dsh-persona`。**spike 实测确认**：在 preset scope 挂第二份 `dsh-system-prompt` 直接抛 `service "systemPrompt" has been registered`（cordis Service duplicate），scoped assembly 的 persona 仍是全局「公司 AI 助手」——即现网 4 个 preset 的 persona **完全没生效**。故本次替换是 **bugfix**（修复 per-agent 身份），不是仅行为变更；`dsh-persona` 才是 shadow 部署 persona 的设计意图插件（README：*"shadow the deployment persona"*）。产出 diff 仍需评审确认 scope 遮蔽覆盖 host patch 的默认 persona。
 3. host 层 `mcp-kb` **保留**（连接只有一份）。composer 的可见性行让 `mcp: []` 的 Agent 看不到 kb 工具——这是相对现网的产品变化（今天 assistant 也能搜知识库），发布前要验收。
 4. 控制面成为 `presets-company` 的唯一写者；人手改 YAML 视为事故（P3 漂移告警）。
 
@@ -290,7 +290,7 @@ POST publish（先 PG 提交、后写文件——文件系统非事务，见下�
 | 4 | 白名单 | 只能从 catalog 勾选模型与 MCP | 任意插件名、任意 YAML |
 | 5 | 安全 | 用户输入只进 YAML 字面量（persona 走库转义）。控制面是 system 根的唯一写者 | 浏览器/API 接收 composition text；为用户字段发 `!!js` |
 | 6 | MCP | 连接留 host（一份实例）。`spec.mcp` 是可见性 allowlist。不能按 preset 各挂同名 `dsh-mcp-client` | 把 mcp-kb 编进每个 preset（第二份 `serverName: kb` 会加载失败） |
-| 7 | persona 插件 | 新编译走 `dsh-persona`：它是 shadow 部署 persona 的设计意图插件；`dsh-system-prompt` 是全局 owner，不能在 preset scope 正确做 per-agent 覆盖 | 与现网 YAML 逐字节兼容（现网 preset 的 persona 可能根本没生效） |
+| 7 | persona 插件 | 新编译走 `dsh-persona`：它是 shadow 部署 persona 的设计意图插件；`dsh-system-prompt` 是全局 owner，preset scope 挂第二份会抛 service duplicate | 现网 preset 的 persona 已实测确认没生效（bugfix） |
 | 8 | 版本 | 复用 `agent_presets.version` 为已发布修订号。P1 就建 revisions。rollback = 新版本 | 第二套 `spec_version`；无历史的 rollback 路由 |
 | 9 | 种子 | 手写 4 份 spec；第一轮 publish 的 YAML diff 当行为变更评审 | 反编译现网 YAML |
 

@@ -106,7 +106,7 @@ v1 四个种子的意图（手写 spec，不做 YAML 反编译）：
 | assistant | 现网通用助手 | deepseek-official / flash，未钉 | `[]` |
 | hr-assistant | 现网 HR 制度 | 同上 | `['kb']` |
 | doc-search | 现网文档检索 | 同上 | `['kb']` |
-| report-builder | 现网报表 | gateway / private/qwen-72b，钉死 | `[]`（`db` 进 catalog 后再勾） |
+| report-builder | 现网报表 | gateway / private/qwen-72b，钉死 | `[]`（`db` 尚未启用，进 catalog 后再勾；description 需同步对齐，避免展示「能查数据却无工具」） |
 
 以后若要做 per-agent 工具面板，用 catalog 驱动的 `Array<{ id: string; enabled: boolean; config?: object }>`，不加 `tools.bash` 这类闭包字段。
 
@@ -142,7 +142,7 @@ catalog 在构造时注入（生产一份、测试一份假目录），调用方
 1. **白名单校验**：`spec.mcp[]` 必须在 catalog 里；`modelRoute` 必须在 `catalog.models` 里；未知 id 报错。
 2. **persona 行**：生成 `@deepseek-ai/dsh-persona`（`config.text` = spec.persona）。persona 经 YAML 库写成块标量，禁止字符串拼接。
 3. **模型行**：生成 `@deepseek-ai/dsh-agent-default-model`（provider / model）。`pinned` **不**只写在 YAML 里——见 §11 决策 1。
-4. **MCP 可见性**：不为每个 preset 编译一份 `dsh-mcp-client`（`serverName` 必须进程内唯一）。编译一条 preset 作用域的工具可见性行，使本 Agent 只暴露 `mcp__<server>__*` 中 `server` ∈ `spec.mcp` 的工具；`mcp: []` 的 assistant 看不到 `knowledge_search`。P0 先钉死这条 IR 的形状，并证实 DSH 作用域能挡住 host 层 MCP；若不能，用一个小的平台插件做过滤，而不是复制 mcp-client。
+4. **MCP 可见性**：不为每个 preset 编译一份 `dsh-mcp-client`（`serverName` 必须进程内唯一）。**spike 结论（已核实）**：`ctx.systemPrompt.tools()` scoped provider 只能**增加** schemas（合并语义，见 `packages/core/system-prompt/tests/scoped.spec.ts` "scoped providers are consulted only for their scope" 的合并断言），不能过滤；过滤要走 `ctx.tools.restrict({ allow?, deny? })`——DSH 现成的 scoped 过滤（`packages/core/tools/src/index.ts`：精确名匹配、未知名报错、只限 scoped context）。因 MCP 工具名 `mcp__<server>__<raw>` 是 mcp-client 运行期动态发现、编译期不可知精确名，故编译一条 preset 作用域的平台插件行 `@company/dsh-tool-mcp-visibility`（config.allowedServers = spec.mcp），该插件在 preset scope 内监听 MCP 工具注册、按 `mcp__<server>__` 前缀构造 `restrict({ deny })` 动态过滤；`mcp: []` 的 assistant 看不到 `knowledge_search`。插件实现落地在 `dsh-source/packages/platform/`。**剩余待验证**：restrict 的「未知名报错」与 MCP 异步注册的时序（deny 名单需在工具注册完成后才完整）。
 5. **realm/isolate**：可见性插件若贡献 service，必须放进 `cordis:group` + `isolate`。规则由编译器决定。
 6. **host-plane 边界**：sandbox / approval / registries / persistence / MCP 连接配置不进 spec。
 7. **序列化**：YAML 库输出；**用户字符串永不进入非字面量位置**。编译器自身也不为用户字段发 `!!js`。产物文件头注释标明 generated，禁止手改。
@@ -214,7 +214,7 @@ CREATE TABLE agent_preset_revisions (
 |---|---|---|---|
 | GET | `/capabilities` | 模型 + MCP 勾选清单 + host-plane 只读项 | 开发者/admin（不必对全体员工暴露内部 serverName） |
 | GET | `/agents/:id/spec` | 默认工作副本；`?at=published` 为最新修订 | 可见者读 published；draft 仅开发者/admin |
-| PUT | `/agents/:id/spec` | 保存工作副本。body 带 `expectedUpdatedAt`；冲突 409。validate 失败 422，不落库 | 开发者/admin |
+| PUT | `/agents/:id/spec` | 保存工作副本。body 带 `expectedUpdatedAt`；冲突 409。validate 失败 422，不落库。**只写 `composition` 列的独立 UPDATE，不走 `upsertAgentPreset`（它每次 `version+1`，会把保存草稿误升为发布）** | 开发者/admin |
 | POST | `/agents/:id/validate` | 只校验 | 开发者/admin |
 | POST | `/agents/:id/publish` | 见 §10。body 带 `expectedVersion`（当前已发布号）；冲突 409 | admin |
 | GET | `/agents/:id/revisions` | 修订列表 | admin |
@@ -247,17 +247,20 @@ CREATE TABLE agent_preset_revisions (
 PUT 工作副本
   → validate → 422 或写入 composition（version 不变，不写文件）
 
-POST publish（同一事务）：
+POST publish（先 PG 提交、后写文件——文件系统非事务，见下方顺序理由）：
   1. 校验 expectedVersion == 行上 version，否则 409
   2. validate(composition)
   3. graph = compile(spec)；yaml = serialize(graph)
-  4. PresetFileStore 原子写入 agent.cordis.yml + preset.yml
-     （失败则事务回滚，磁盘不留半文件）
-  5. INSERT agent_preset_revisions (version+1, spec, yaml, …)
-  6. 行：version+1，status=published，投影列从 spec 覆写，updated_*
-  7. audit_events 记 compose_publish
+  4. 【PG 事务 commit】INSERT agent_preset_revisions (version+1, spec, yaml, …)
+     + 行 version+1 + status=published + 投影列从 spec 覆写 + updated_*
+     + audit_events 记 compose_publish
+  5. 【commit 之后】PresetFileStore 原子写入 agent.cordis.yml + preset.yml
+     （写失败 → 触发 rollback 回上一修订，或标漂移告警；绝不先写盘后入库）
   → roster 下次 list() 见到新 stamp
   → 新 session 挂新 generation；存量 session 不变
+
+  顺序理由：roster 只认文件 stamp。「PG 先、文件后」的失败模式 = 发布未生效（靠漂移告警发现，可控）；
+  「文件先、PG 后」的失败模式 = 运行着 PG 不认的无主版本（不可控）。两者都非原子，取前者。
 ```
 
 `pinned: true` 的强制点在控制面创建会话与模型网关：拒绝会话级改模型。YAML 里的 `agent-default-model` 只是默认值；配额继续读投影列 `model_route`（与 YAML 在 publish 时同源）。
@@ -271,7 +274,7 @@ POST publish（同一事务）：
 不做 YAML → AgentSpec 反编译。现网 YAML 对不上薄 spec，persona 还挂在 `dsh-system-prompt` 上。
 
 1. 按 §4.2 手写 4 份种子 spec，写入 `composition`（P1 迁移或种子脚本）。
-2. 第一次 publish 将 YAML 从 `dsh-system-prompt.config.persona` 换成 `dsh-persona`。这是行为变更：产出 diff 必须评审，确认 scope 遮蔽仍覆盖 host patch 里的默认 persona。
+2. 第一次 publish 将 YAML 从 `dsh-system-prompt.config.persona` 换成 `dsh-persona`。理由：`dsh-system-prompt` 是全局 `deployment:persona` 的 owner（process 唯一，README 明说 *"a process has exactly one"*），在 preset scope 里挂它做 per-agent 覆盖是可疑用法；`dsh-persona` 才是专门用来 shadow 部署 persona 的插件（README：*"shadow the deployment persona"*）。**迁移前先验证现网 4 个 preset 的 persona 是否真的 shadow 了全局 persona**——若未生效，则本次替换是 bugfix（修复 per-agent 身份）而非仅行为变更；无论哪种，产出 diff 都需评审确认 scope 遮蔽仍覆盖 host patch 的默认 persona。
 3. host 层 `mcp-kb` **保留**（连接只有一份）。composer 的可见性行让 `mcp: []` 的 Agent 看不到 kb 工具——这是相对现网的产品变化（今天 assistant 也能搜知识库），发布前要验收。
 4. 控制面成为 `presets-company` 的唯一写者；人手改 YAML 视为事故（P3 漂移告警）。
 
@@ -287,7 +290,7 @@ POST publish（同一事务）：
 | 4 | 白名单 | 只能从 catalog 勾选模型与 MCP | 任意插件名、任意 YAML |
 | 5 | 安全 | 用户输入只进 YAML 字面量（persona 走库转义）。控制面是 system 根的唯一写者 | 浏览器/API 接收 composition text；为用户字段发 `!!js` |
 | 6 | MCP | 连接留 host（一份实例）。`spec.mcp` 是可见性 allowlist。不能按 preset 各挂同名 `dsh-mcp-client` | 把 mcp-kb 编进每个 preset（第二份 `serverName: kb` 会加载失败） |
-| 7 | persona 插件 | 新编译走 `dsh-persona`（对齐 DSH standard） | 与现网 YAML 逐字节兼容 |
+| 7 | persona 插件 | 新编译走 `dsh-persona`：它是 shadow 部署 persona 的设计意图插件；`dsh-system-prompt` 是全局 owner，不能在 preset scope 正确做 per-agent 覆盖 | 与现网 YAML 逐字节兼容（现网 preset 的 persona 可能根本没生效） |
 | 8 | 版本 | 复用 `agent_presets.version` 为已发布修订号。P1 就建 revisions。rollback = 新版本 | 第二套 `spec_version`；无历史的 rollback 路由 |
 | 9 | 种子 | 手写 4 份 spec；第一轮 publish 的 YAML diff 当行为变更评审 | 反编译现网 YAML |
 
@@ -295,7 +298,7 @@ POST publish（同一事务）：
 
 ## 13. 分阶段实施
 
-1. **P0 — 编译器 + catalog**：硬编码 models / mcpServers + `AgentComposer`（validate / compile IR / serialize）。黄金测试：4 份种子 spec 的 IR + YAML。钉死 MCP 可见性行的形状，并证实能挡住 host MCP。不做工具开关、反编译、编辑器。
+1. **P0 — 编译器 + catalog**：硬编码 models / mcpServers + `AgentComposer`（validate / compile IR / serialize）。黄金测试：4 份种子 spec 的 IR + YAML。**spike 已核实过滤 seam**：`tools.restrict()`（systemPrompt.tools 只能增不能减），MCP 可见性行定为平台插件 `@company/dsh-tool-mcp-visibility`；剩余验证 restrict 与 MCP 异步注册的时序、以及现网 preset 的 persona 是否真的 shadow 了全局 persona（定决策 7 是 bugfix 还是行为变更）。不做工具开关、反编译、编辑器。
 2. **P1 — 存储 + API**：`008` 迁移（`composition` + `agent_preset_revisions`）、种子 spec 入库、`/capabilities`、GET/PUT spec、publish 事务（compile + 原子写 + 修订 + 投影列）、`expectedVersion` / `expectedUpdatedAt`。rollback 在修订表可查询的同一迭代落地，不是空路由。
 3. **P2 — 编辑器 UI**：中栏薄表单接入 web/store；YAML 预览默认可藏。`propose` 改复制已发布 spec。
 4. **P3 — 时间线 UI + 漂移告警**：修订列表、rollback 按钮、磁盘哈希对照。catalog 仍硬编码，直到 MCP 农场真会变（Rule of Three）。

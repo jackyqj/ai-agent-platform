@@ -7,7 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "node --import tsx --test src/secrets/*.test.ts src/users/*.test.ts src/sessions/*.test.ts src/instances/*.test.ts src/admin/*.test.ts src/common/*.test.ts src/keys/*.test.ts"
+    "test": "node --import tsx --test src/secrets/*.test.ts src/users/*.test.ts src/sessions/*.test.ts src/instances/*.test.ts src/admin/*.test.ts src/common/*.test.ts src/keys/*.test.ts src/agents/*.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",
@@ -19,7 +19,8 @@
     "ioredis": "^6.0.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

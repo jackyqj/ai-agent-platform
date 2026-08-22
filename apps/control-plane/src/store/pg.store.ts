@@ -306,6 +306,96 @@ export class PgStore {
     await this.pool!.query(`UPDATE agent_presets SET based_on = $2 WHERE id = $1`, [id, basedOn])
   }
 
+  // --- 12 Agent 编排（008）：composition 工作副本 + revisions 已发布真源 ---
+
+  /** 只写工作副本（composition 列），不 bump version、不写文件。 */
+  async updateAgentComposition(id: string, composition: unknown, updatedBy: string): Promise<void> {
+    await this.pool!.query(
+      `UPDATE agent_presets SET composition = $2, updated_by = $3, updated_at = now() WHERE id = $1`,
+      [id, JSON.stringify(composition), updatedBy],
+    )
+  }
+
+  async getAgentComposition(id: string) {
+    const res = await this.pool!.query(
+      `SELECT composition, version, updated_by AS "updatedBy", updated_at AS "updatedAt"
+       FROM agent_presets WHERE id = $1`,
+      [id],
+    )
+    return res.rows[0] ?? undefined
+  }
+
+  async listAgentRevisions(id: string): Promise<Record<string, unknown>[]> {
+    const res = await this.pool!.query(
+      `SELECT preset_id AS "presetId", version, spec, compiled_yaml AS "compiledYaml",
+              compiled_meta AS "compiledMeta", published_by AS "publishedBy", published_at AS "publishedAt"
+       FROM agent_preset_revisions WHERE preset_id = $1 ORDER BY version DESC`,
+      [id],
+    )
+    return res.rows
+  }
+
+  async getAgentRevision(id: string, version: number) {
+    const res = await this.pool!.query(
+      `SELECT preset_id AS "presetId", version, spec, compiled_yaml AS "compiledYaml",
+              compiled_meta AS "compiledMeta", published_by AS "publishedBy", published_at AS "publishedAt"
+       FROM agent_preset_revisions WHERE preset_id = $1 AND version = $2`,
+      [id, version],
+    )
+    return res.rows[0] ?? undefined
+  }
+
+  /**
+   * 发布事务（docs/agent-orchestration-design.md §10 步骤 4）：
+   * 校验乐观并发 → 插修订 → 覆写投影列 + version+1，一次性提交。返回新 version。
+   * 文件写入在事务 commit 之后由调用方执行（roster 只认文件 stamp）。
+   */
+  async publishAgentPreset(p: {
+    id: string
+    spec: unknown
+    name: string
+    description: string
+    visibility: unknown
+    modelRoute: unknown
+    approvalLevel: string
+    compiledYaml: string
+    compiledMeta: string
+    publishedBy: string
+    expectedVersion: number
+  }): Promise<number> {
+    const client = await this.pool!.connect()
+    try {
+      await client.query('BEGIN')
+      const cur = await client.query<{ version: number }>(
+        `SELECT version FROM agent_presets WHERE id = $1 FOR UPDATE`, [p.id],
+      )
+      if (cur.rows.length === 0) throw new Error(`agent ${p.id} not found`)
+      if (cur.rows[0].version !== p.expectedVersion) {
+        throw new Error(`version conflict: expected ${p.expectedVersion}, got ${cur.rows[0].version}`)
+      }
+      const next = p.expectedVersion + 1
+      await client.query(
+        `INSERT INTO agent_preset_revisions (preset_id, version, spec, compiled_yaml, compiled_meta, published_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [p.id, next, JSON.stringify(p.spec), p.compiledYaml, p.compiledMeta, p.publishedBy],
+      )
+      await client.query(
+        `UPDATE agent_presets SET version = $2, status = 'published',
+                name = $3, description = $4, visibility = $5, model_route = $6, approval_level = $7,
+                updated_by = $8, updated_at = now()
+         WHERE id = $1`,
+        [p.id, next, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.publishedBy],
+      )
+      await client.query('COMMIT')
+      return next
+    } catch (e) {
+      await client.query('ROLLBACK')
+      throw e
+    } finally {
+      client.release()
+    }
+  }
+
   // --- 14：审批（approval_requests 表） ---
 
   async insertApproval(a: {

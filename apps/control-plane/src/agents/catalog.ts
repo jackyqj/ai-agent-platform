@@ -5,7 +5,7 @@
 import type { CapabilityCatalog, HostDef, McpServerDef, ModelDef } from './types.js'
 
 export const MODELS: ModelDef[] = [
-  { provider: 'deepseek-official', model: 'deepseek-v4-flash', label: 'DeepSeek 官方 flash（云端通用）' },
+  { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', label: 'DeepSeek 官方 flash（云端通用）' },
   { provider: 'gateway', model: 'private/qwen-72b', label: '私有 Qwen 72B（机密数据钉死）' },
 ]
 

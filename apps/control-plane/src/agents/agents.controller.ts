@@ -1,9 +1,11 @@
-// Agent 商店 API（12 工单）：员工可见列表/详情 + 管理上架/下架/可见性
-import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common'
+// Agent 商店 API（12 工单）+ 编排 API（agent-orchestration-design.md §8）
+import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
 import { AuthGuard } from '../common/auth.guard.js'
 import { PermissionGuard } from '../common/permission.guard.js'
 import { RequirePermission } from '../common/require-permission.decorator.js'
-import { AgentsService } from './agents.service.js'
+import { can, type Role } from '../common/permissions.js'
+import { AgentsService, SpecValidationError } from './agents.service.js'
+import type { AgentSpec } from './types.js'
 
 @Controller()
 export class AgentsController {
@@ -21,7 +23,6 @@ export class AgentsController {
   async get(@Req() req: { user: { role: string; dept: string } }, @Param('id') id: string) {
     const a = await this.agents.get(id)
     if (!a || a.status !== 'published') throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
-    // 详情同样遵守可见性（不能绕过列表直接 GET 隐藏 Agent）
     const r = a.visibility.roles
     if (r && r.length && !r.includes(req.user.role)) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
     const d = a.visibility.departments
@@ -37,14 +38,80 @@ export class AgentsController {
     return { agents: await this.agents.list() }
   }
 
-  /** 上架（发布到商店） */
+  // ── 编排 API（agent-orchestration-design.md §8）──
+
+  /** 能力目录：模型 + MCP 勾选清单 + host-plane 只读项 */
+  @Get('capabilities')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.edit')
+  async capabilities() {
+    return this.agents.capabilities()
+  }
+
+  /** 编排 spec 视图；draft（有未发布工作副本）对无 agent.edit 权限者隐藏 */
+  @Get('agents/:id/spec')
+  @UseGuards(AuthGuard)
+  async getSpec(@Req() req: { user: { role: string } }, @Param('id') id: string) {
+    try {
+      const view = await this.agents.getSpec(id)
+      if (view.dirty && !can(req.user.role as Role, 'agent.edit')) {
+        throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+      }
+      return view
+    } catch (e) {
+      if (e instanceof HttpException) throw e
+      throw new HttpException((e as Error).message, HttpStatus.NOT_FOUND)
+    }
+  }
+
+  /** 保存工作副本（不发布、不 bump version、不写文件） */
+  @Put('agents/:id/spec')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.edit')
+  async putSpec(
+    @Req() req: { user: { sub: string } },
+    @Param('id') id: string,
+    @Body() body: { spec: AgentSpec; expectedUpdatedAt?: string },
+  ) {
+    try {
+      await this.agents.putSpec(id, body.spec, req.user.sub, body.expectedUpdatedAt)
+      return { notice: '已保存草稿' }
+    } catch (e) {
+      if (e instanceof SpecValidationError) {
+        throw new HttpException({ errors: e.result.ok === false ? e.result.errors : [] }, HttpStatus.UNPROCESSABLE_ENTITY)
+      }
+      throw new HttpException((e as Error).message, HttpStatus.CONFLICT)
+    }
+  }
+
+  /** 仅校验，不保存（编辑器实时提示） */
+  @Post('agents/:id/validate')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.edit')
+  async validate(@Body() body: { spec: AgentSpec }) {
+    return this.agents.validateSpec(body.spec)
+  }
+
+  /** 发布：compile → PG 事务（修订 + 投影列 + version+1）→ 原子写文件 */
   @Post('admin/agents/:id/publish')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.publish')
-  async publish(@Param('id') id: string) {
-    const a = await this.agents.publish(id)
-    if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
-    return { agent: a, notice: '已上架（preset 文件需存在于 preset 根）' }
+  async publish(
+    @Req() req: { user: { sub: string } },
+    @Param('id') id: string,
+    @Body() body: { expectedVersion?: number },
+  ) {
+    try {
+      const current = await this.agents.get(id)
+      if (!current) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+      const r = await this.agents.publishSpec(id, body.expectedVersion ?? current.version, req.user.sub)
+      return { agent: r.agent, version: r.version, notice: '已发布' }
+    } catch (e) {
+      if (e instanceof SpecValidationError) {
+        throw new HttpException({ errors: e.result.ok === false ? e.result.errors : [] }, HttpStatus.UNPROCESSABLE_ENTITY)
+      }
+      throw new HttpException((e as Error).message, HttpStatus.CONFLICT)
+    }
   }
 
   /** 下架（新会话不可选，存量不受影响） */
@@ -67,9 +134,29 @@ export class AgentsController {
     return { agent: a }
   }
 
+  /** 修订列表 */
+  @Get('admin/agents/:id/revisions')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async revisions(@Param('id') id: string) {
+    return { revisions: await this.agents.listRevisions(id) }
+  }
+
+  /** 回滚：把目标修订 spec 作为工作副本再 publish（新版本） */
+  @Post('admin/agents/:id/rollback')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async rollback(@Req() req: { user: { sub: string } }, @Param('id') id: string, @Body() body: { toVersion: number }) {
+    try {
+      const r = await this.agents.rollback(id, body.toVersion, req.user.sub)
+      return { agent: r.agent, version: r.version, notice: `已回滚到 v${body.toVersion}（新版本 v${r.version}）` }
+    } catch (e) {
+      throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
+    }
+  }
+
   // ── 员工自建提审 ──
 
-  /** 提审新 Agent（员工；基于模板，复制即作者写入口） */
   @Post('agents/propose')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.propose')
@@ -88,7 +175,6 @@ export class AgentsController {
     }
   }
 
-  /** admin 批准：生成 preset 文件并上架 */
   @Post('admin/agents/:id/approve')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.approve')
@@ -102,7 +188,6 @@ export class AgentsController {
     }
   }
 
-  /** admin 拒绝 */
   @Post('admin/agents/:id/reject')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.approve')

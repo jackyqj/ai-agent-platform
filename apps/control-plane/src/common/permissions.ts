@@ -5,6 +5,7 @@ export type Permission =
   | 'agent.publish'      // 上架/下架/可见性
   | 'agent.approve'      // 批准/拒绝员工提审
   | 'agent.propose'      // 员工提审
+  | 'agent.edit'         // 编排 spec 编辑（draft 读写 / 校验）
   | 'approval.decide'    // 审批决定
   | 'quota.manage'       // 配额策略管理
   | 'quota.view'         // 用量/策略查看
@@ -23,6 +24,7 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'agent.propose': ['employee', 'developer', 'admin'],
   'task.cancel': ['employee', 'developer', 'admin'], // 自己的任务（归属校验仍生效）
   // 开发者
+  'agent.edit': ['developer', 'admin'], // 编排 spec 编辑
   'audit.view': ['admin'], // v1 收紧到 admin；开发者审计权限按需放开
   // 管理员
   'agent.publish': ['admin'],

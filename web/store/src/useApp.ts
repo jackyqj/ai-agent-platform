@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
-import type { AdminPane, AgentSpec, AppState, Route } from './types';
+import { buildSessionTitles, extractQuestionHint, formatSessionTitle, isQuotaError, tasksToMessages } from './chat-utils';
+import { canKbManage, isFullAdmin, validateKbFile } from './kb-utils';
+import type { AdminPane, AgentSpec, AppState, ChatMessage, KbVisibility, Me, Route, TaskView } from './types';
 import { localToIso } from './util';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -18,6 +20,7 @@ const initial: AppState = {
   agents: [],
   agentBusy: {},
   mySessions: [],
+  sessionTitles: {},
   myApprovals: [],
   schedTasks: [],
   schedRuns: [],
@@ -65,6 +68,17 @@ const initial: AppState = {
   ovDept: '',
   ovPreset: 'workspace-write',
 
+  kbDocuments: [],
+  kbStatus: null,
+  kbUploadClass: 'internal',
+  kbSearchQuery: '',
+  kbSearchDept: 'HR',
+  kbSearchRole: 'employee',
+  kbSearchHits: [],
+  kbSearchMode: '',
+  kbPendingUpload: null,
+  kbAudit: [],
+
   errors: {},
   compose: null,
 };
@@ -76,10 +90,12 @@ export interface Actions {
   logout(): void;
   loadStore(): Promise<void>;
   loadAdminData(): Promise<void>;
+  loadKbAdminData(): Promise<void>;
   startChat(agentId: string): Promise<void>;
-  openChat(sessionId: string, agentId: string): void;
+  openChat(sessionId: string, agentId: string): Promise<void>;
   closeChat(): void;
-  sendMessage(agentId: string, text: string): Promise<string>;
+  deleteSession(sessionId: string): Promise<void>;
+  sendMessage(agentId: string, text: string): Promise<void>;
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
@@ -119,6 +135,12 @@ export interface Actions {
   saveOverlay(): Promise<void>;
   clearOverlay(): Promise<void>;
   loadAudit(): Promise<void>;
+  uploadKb(file: File): Promise<void>;
+  confirmKbUpload(): Promise<void>;
+  deleteKb(name: string): Promise<void>;
+  saveKbVisibility(name: string, visibility: KbVisibility): Promise<void>;
+  triggerKbIngest(): Promise<void>;
+  runKbSearch(): Promise<void>;
 }
 
 export function useApp(clientOverride?: Client): { state: AppState; act: Actions } {
@@ -128,6 +150,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const [state, setState] = useState<AppState>(initial);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ingestPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function update(patch: Partial<AppState>) {
     setState((prev) => ({ ...prev, ...patch }));
@@ -141,16 +164,21 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, sessionsRes, schedRes, approvalRes] = await Promise.all([
+      const [agentsRes, sessionsRes, schedRes, approvalRes, tasksRes] = await Promise.all([
         client.listAgents(),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
         client.listScheduled().catch(() => ({ tasks: [] as AppState['schedTasks'] })),
         client.myApprovals().catch(() => ({ approvals: [] as AppState['myApprovals'] })),
+        client.listTasks().catch(() => ({ tasks: [] as TaskView[] })),
       ]);
+      const agents = agentsRes.agents || [];
+      const mySessions = (sessionsRes.sessions || []).filter((s) => s.status !== 'closed');
+      const tasks = tasksRes.tasks || [];
       setState((prev) => ({
         ...prev,
-        agents: agentsRes.agents || [],
-        mySessions: (sessionsRes.sessions || []).filter((s) => s.status !== 'closed'),
+        agents,
+        mySessions,
+        sessionTitles: buildSessionTitles(mySessions, agents, tasks),
         schedTasks: schedRes.tasks || [],
         myApprovals: approvalRes.approvals || [],
       }));
@@ -192,6 +220,9 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       client.admin.allScheduled().then((r) => setState((prev) => ({ ...prev, allSched: r.tasks || [] }))).catch(recordError('sched')),
       client.admin.scheduledRuns({ status: 'failed' }).then((r) => setState((prev) => ({ ...prev, schedFailRuns: r.runs || [] }))).catch(recordError('schedRuns')),
       client.admin.roles().then((r) => setState((prev) => ({ ...prev, roleDefs: r.roles || [] }))).catch(recordError('roles')),
+      client.admin.kbDocuments().then((r) => setState((prev) => ({ ...prev, kbDocuments: r.documents || [] }))).catch(recordError('kb')),
+      client.admin.kbStatus().then((r) => setState((prev) => ({ ...prev, kbStatus: r }))).catch(recordError('kb')),
+      client.admin.kbAudit().then((r) => setState((prev) => ({ ...prev, kbAudit: r.events || [] }))).catch(recordError('kb')),
       fetchAudit({
         limit: '50',
         ...(state.auditUser ? { userId: state.auditUser } : {}),
@@ -202,15 +233,45 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     await Promise.allSettled(jobs);
   }
 
+  async function loadKbAdminData() {
+    await Promise.allSettled([
+      client.admin.kbDocuments().then((r) => setState((prev) => ({ ...prev, kbDocuments: r.documents || [] }))).catch(recordError('kb')),
+      client.admin.kbStatus().then((r) => setState((prev) => ({ ...prev, kbStatus: r }))).catch(recordError('kb')),
+      client.admin.kbAudit().then((r) => setState((prev) => ({ ...prev, kbAudit: r.events || [] }))).catch(recordError('kb')),
+    ]);
+  }
+
+  function stopIngestPoll() {
+    if (ingestPollRef.current) {
+      clearInterval(ingestPollRef.current);
+      ingestPollRef.current = null;
+    }
+  }
+
+  function startIngestPoll() {
+    stopIngestPoll();
+    ingestPollRef.current = setInterval(() => {
+      void client.admin.kbStatus().then(async (status) => {
+        setState((prev) => ({ ...prev, kbStatus: status }));
+        if (!status.ingestRunning) {
+          stopIngestPoll();
+          await reloadKb();
+          notify(status.ingestError ? '索引重建失败' : '索引重建完成', !!status.ingestError);
+        }
+      }).catch(() => undefined);
+    }, 2000);
+  }
+
   async function login() {
     update({ loading: true });
     try {
       await client.devLogin(state.loginUser);
       const me = await client.me();
-      const parsed = parseLocation(location.hash, me.role);
+      const parsed = parseLocation(location.hash, me);
       update({ me, route: parsed.route, adminPane: parsed.adminPane, showDevLogin: false });
       await loadStore();
-      if (me.role === 'admin') await loadAdminData();
+      if (isFullAdmin(me)) await loadAdminData();
+      else if (canKbManage(me)) await loadKbAdminData();
       notify('已登录：' + me.name);
     } catch (e) {
       notify('登录失败：' + (e as Error).message, true);
@@ -223,13 +284,55 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     setState(initial);
   }
 
-  function openChat(sessionId: string, agentId: string) {
+  function patchChat(agentId: string, patch: Partial<NonNullable<AppState['chat']>>) {
+    setState((prev) => {
+      if (!prev.chat || prev.chat.agentId !== agentId) return prev;
+      return { ...prev, chat: { ...prev.chat, ...patch } };
+    });
+  }
+
+  function appendChatMessages(agentId: string, extra: ChatMessage[]) {
+    setState((prev) => {
+      if (!prev.chat || prev.chat.agentId !== agentId) return prev;
+      return { ...prev, chat: { ...prev.chat, messages: [...prev.chat.messages, ...extra] } };
+    });
+  }
+
+  async function loadChatHistory(agentId: string, sessionId: string | null) {
+    try {
+      let since: string | undefined;
+      if (sessionId) {
+        const sessions = await client.listSessions();
+        since = (sessions.sessions || []).find((s) => s.id === sessionId)?.createdAt;
+      }
+      const r = await client.listTasks();
+      const messages = tasksToMessages(r.tasks || [], agentId, since);
+      patchChat(agentId, { messages, historyLoading: false });
+      if (sessionId && since) {
+        setState((prev) => {
+          const agentName = prev.agents.find((a) => a.id === agentId)?.name ?? agentId;
+          return {
+            ...prev,
+            sessionTitles: {
+              ...prev.sessionTitles,
+              [sessionId]: formatSessionTitle(agentName, r.tasks || [], agentId, since),
+            },
+          };
+        });
+      }
+    } catch {
+      patchChat(agentId, { historyLoading: false });
+    }
+  }
+
+  async function openChat(sessionId: string, agentId: string) {
     setState((prev) => ({
       ...prev,
       route: 'chat',
-      chat: { sessionId, agentId, error: null },
+      chat: { sessionId, agentId, error: null, messages: [], historyLoading: true },
     }));
     history.replaceState(null, '', '#chat');
+    await loadChatHistory(agentId, sessionId);
   }
 
   function closeChat() {
@@ -240,35 +343,89 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   async function startChat(agentId: string) {
     const existing = state.mySessions.find((s) => s.agentPresetId === agentId && s.status !== 'closed');
     if (existing) {
-      openChat(existing.id, agentId);
+      await openChat(existing.id, agentId);
       return;
     }
     setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [agentId]: true } }));
     try {
       const r = await client.createSession(agentId);
       await loadStore();
-      openChat(r.sessionId, agentId);
+      await openChat(r.sessionId, agentId);
     } catch {
       setState((prev) => ({
         ...prev,
         route: 'chat',
-        chat: { sessionId: null, agentId, error: '实例还没起来，请稍后重试' },
+        chat: { sessionId: null, agentId, error: '实例还没起来，请稍后重试', messages: [] },
       }));
       history.replaceState(null, '', '#chat');
     }
     setState((prev) => ({ ...prev, agentBusy: { ...prev.agentBusy, [agentId]: false } }));
   }
 
-  async function sendMessage(agentId: string, text: string): Promise<string> {
-    const r = await client.submitTask(agentId, text);
-    if (r.awaitingApproval) return '已提交，等待审批通过后执行。';
-    for (let i = 0; i < 40; i++) {
-      const g = await client.getTask(r.taskId);
-      if (g.task.status === 'done') return g.task.result?.finalResponse ?? '（无回复）';
-      if (g.task.status === 'failed') throw new Error(g.task.error || '任务失败');
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+  async function deleteSession(sessionId: string) {
+    const wasCurrent = state.chat?.sessionId === sessionId;
+    try {
+      await client.closeSession(sessionId);
+      await loadStore();
+      if (wasCurrent) closeChat();
+      notify('对话已删除');
+    } catch (e) {
+      notify('删除失败：' + (e as Error).message, true);
     }
-    return '仍在执行。刷新对话或稍后再看结果。';
+  }
+
+  async function sendMessage(agentId: string, text: string): Promise<void> {
+    const sessionId = state.chat?.sessionId;
+    const isFirstQuestion = !(state.chat?.messages ?? []).some((m) => m.role === 'user');
+    appendChatMessages(agentId, [{ role: 'user', text }]);
+    if (sessionId && isFirstQuestion) {
+      const agentName = state.agents.find((a) => a.id === agentId)?.name ?? agentId;
+      const hint = extractQuestionHint(text);
+      if (hint) {
+        setState((prev) => ({
+          ...prev,
+          sessionTitles: { ...prev.sessionTitles, [sessionId]: `${agentName} · ${hint}` },
+        }));
+      }
+    }
+    patchChat(agentId, { sending: true });
+    try {
+      const r = await client.submitTask(agentId, text);
+      if (r.awaitingApproval) {
+        appendChatMessages(agentId, [{ role: 'assistant', text: '已提交，等待审批通过后执行。' }]);
+        return;
+      }
+      for (let i = 0; i < 40; i++) {
+        const g = await client.getTask(r.taskId);
+        if (g.task.status === 'done') {
+          appendChatMessages(agentId, [{ role: 'assistant', text: g.task.result?.finalResponse ?? '（无回复）' }]);
+          return;
+        }
+        if (g.task.status === 'failed') {
+          appendChatMessages(agentId, [{ role: 'assistant', text: g.task.error || '任务失败' }]);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+      appendChatMessages(agentId, [{ role: 'assistant', text: '仍在执行。刷新对话或稍后再看结果。' }]);
+    } catch (e) {
+      const message = (e as Error).message;
+      // 限额等未真正发出的提问：从 transcript 撤回，改为 toast，避免留下「我 / 执行中」残影。
+      if (isQuotaError(message)) {
+        setState((prev) => {
+          if (!prev.chat || prev.chat.agentId !== agentId) return prev;
+          const messages = [...prev.chat.messages];
+          const last = messages[messages.length - 1];
+          if (last?.role === 'user' && last.text === text) messages.pop();
+          return { ...prev, chat: { ...prev.chat, messages } };
+        });
+        notify(message, true);
+      } else {
+        appendChatMessages(agentId, [{ role: 'assistant', text: message }]);
+      }
+    } finally {
+      patchChat(agentId, { sending: false });
+    }
   }
 
   async function propose() {
@@ -624,6 +781,105 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('查询失败：' + (e as Error).message, true); }
   }
 
+  async function reloadKb() {
+    const [docs, status, audit] = await Promise.all([
+      client.admin.kbDocuments(),
+      client.admin.kbStatus(),
+      client.admin.kbAudit(),
+    ]);
+    setState((prev) => ({
+      ...prev,
+      kbDocuments: docs.documents || [],
+      kbStatus: status,
+      kbAudit: audit.events || [],
+    }));
+  }
+
+  async function doUploadKb(file: File) {
+    const me = state.me;
+    const contentBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        resolve(dataUrl.split(',')[1] ?? '');
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+      reader.readAsDataURL(file);
+    });
+    const departments = isFullAdmin(me) ? ['*'] : me?.dept ? [me.dept] : ['*'];
+    await client.admin.uploadKbDocument(file.name, contentBase64, {
+      classification: state.kbUploadClass,
+      departments,
+      roles: [],
+    });
+    await reloadKb();
+    notify('已上传：' + file.name);
+  }
+
+  async function uploadKb(file: File) {
+    const err = validateKbFile(file);
+    if (err) {
+      notify(err, true);
+      return;
+    }
+    if (state.kbDocuments.some((d) => d.name === file.name)) {
+      setState((prev) => ({ ...prev, kbPendingUpload: file }));
+      return;
+    }
+    try {
+      await doUploadKb(file);
+    } catch (e) {
+      notify('上传失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function confirmKbUpload() {
+    const file = state.kbPendingUpload;
+    if (!file) return;
+    setState((prev) => ({ ...prev, kbPendingUpload: null }));
+    try {
+      await doUploadKb(file);
+    } catch (e) {
+      notify('上传失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function deleteKb(name: string) {
+    try {
+      await client.admin.deleteKbDocument(name);
+      await reloadKb();
+      notify('已删除：' + name);
+    } catch (e) { notify('删除失败：' + (e as Error).message, true); }
+  }
+
+  async function saveKbVisibility(name: string, visibility: KbVisibility) {
+    try {
+      await client.admin.patchKbVisibility(name, visibility);
+      await reloadKb();
+      notify('已更新权限：' + name);
+    } catch (e) { notify('权限更新失败：' + (e as Error).message, true); }
+  }
+
+  async function triggerKbIngest() {
+    try {
+      await client.admin.triggerKbIngest();
+      notify('已开始重建索引…');
+      const status = await client.admin.kbStatus();
+      setState((prev) => ({ ...prev, kbStatus: status }));
+      startIngestPoll();
+    } catch (e) { notify('索引任务失败：' + (e as Error).message, true); }
+  }
+
+  async function runKbSearch() {
+    try {
+      const user = state.kbSearchDept.trim()
+        ? { departments: [state.kbSearchDept.trim()], roles: state.kbSearchRole.trim() ? [state.kbSearchRole.trim()] : [] }
+        : undefined;
+      const r = await client.admin.kbSearch({ query: state.kbSearchQuery, limit: 5, user });
+      setState((prev) => ({ ...prev, kbSearchHits: r.hits || [], kbSearchMode: r.mode || '' }));
+    } catch (e) { notify('试搜失败：' + (e as Error).message, true); }
+  }
+
   // Restore a stored session on first mount. SSO callback lands on #token=.
   useEffect(() => {
     const raw = location.hash.replace(/^#/, '');
@@ -638,10 +894,11 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       try {
         const me = await client.me();
         if (cancelled) return;
-        const parsed = parseLocation(ssoToken ? '' : location.hash, me.role);
+        const parsed = parseLocation(ssoToken ? '' : location.hash, me);
         setState((prev) => ({ ...prev, me, route: parsed.route, adminPane: parsed.adminPane }));
         await loadStore();
-        if (me.role === 'admin') await loadAdminData();
+        if (isFullAdmin(me)) await loadAdminData();
+        else if (canKbManage(me)) await loadKbAdminData();
       } catch {
         if (!cancelled) {
           client.clearToken();
@@ -655,23 +912,33 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => () => stopIngestPoll(), []);
+
   const act: Actions = {
-    update, notify, login, logout, loadStore, loadAdminData, startChat, openChat, closeChat, sendMessage, propose,
+    update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, propose,
     decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
+    uploadKb, confirmKbUpload, deleteKb, saveKbVisibility, triggerKbIngest, runKbSearch,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,
   };
 
   return { state, act };
 }
 
-export function parseLocation(hash: string, role: string): { route: Route; adminPane: AdminPane } {
+export function parseLocation(hash: string, me: Me | null): { route: Route; adminPane: AdminPane } {
   const h = hash.replace(/^#/, '');
+  const kbOk = canKbManage(me);
+  const fullAdmin = isFullAdmin(me);
   if (h === 'chat' || h.startsWith('chat/')) return { route: 'chat', adminPane: 'workbench' };
   if (h.startsWith('admin')) {
-    if (role !== 'admin') return { route: 'store', adminPane: 'workbench' };
-    const adminPane: AdminPane = h === 'admin/config' ? 'config' : h === 'admin/investigate' ? 'investigate' : 'workbench';
+    if (!kbOk) return { route: 'store', adminPane: 'workbench' };
+    if (!fullAdmin) return { route: 'admin', adminPane: 'kb' };
+    const adminPane: AdminPane =
+      h === 'admin/config' ? 'config'
+        : h === 'admin/kb' ? 'kb'
+          : h === 'admin/investigate' ? 'investigate'
+            : 'workbench';
     return { route: 'admin', adminPane };
   }
   return { route: 'store', adminPane: 'workbench' };

@@ -61,3 +61,17 @@ test('PermissionGuard allows a custom role with the granted permission', async (
   const guard = new PermissionGuard(reflector as never, audit, roles)
   assert.equal(await guard.canActivate(fakeCtx({ sub: 'u-1', role: 'auditor' }) as never), true)
 })
+
+test('PermissionGuard allows custom role with kb.manage', async () => {
+  const audit = new AuditStore(new PgStore(undefined))
+  const roleStore = new Map<string, { permissions: string[]; dshPreset: string }>()
+  roleStore.set('kb-editor', { permissions: ['kb.manage'], dshPreset: 'workspace-write' })
+  const roles = new RolesService({
+    pool: {},
+    listRoleDefinitions: async () => [...roleStore.entries()].map(([name, v]) => ({ name, permissions: v.permissions, dshPreset: v.dshPreset })),
+  } as never)
+  await roles.onModuleInit()
+  const reflector = { getAllAndOverride: () => 'kb.manage' }
+  const guard = new PermissionGuard(reflector as never, audit, roles)
+  assert.equal(await guard.canActivate(fakeCtx({ sub: 'u-hr-1', role: 'kb-editor' }) as never), true)
+})

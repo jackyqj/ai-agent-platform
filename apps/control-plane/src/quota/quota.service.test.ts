@@ -148,3 +148,36 @@ test('resolveAlert：已处置/不存在 → ok=false 不审计', async () => {
   assert.equal(r.ok, false)
   assert.equal(events.length, 0)
 })
+
+test('upsert 同一范围+周期复用已有策略 id（更新而非新建）', async () => {
+  const calls: Record<string, unknown>[] = []
+  const { svc } = makeService({
+    listQuotaPolicies: async () => [
+      { id: 'p-all', scopeType: 'all', period: 'day', budgetRequests: 20, overPolicy: 'reject' },
+      { id: 'p-user', scopeType: 'user', scopeId: 'u-smoke2', period: 'day', budgetRequests: 1, overPolicy: 'warn' },
+    ],
+    upsertQuotaPolicy: async (p: Record<string, unknown>) => { calls.push(p) },
+  })
+  await svc.upsert({ scopeType: 'all', budgetRequests: 25 })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].id, 'p-all', '全员策略应带上已有 id')
+  assert.equal(calls[0].budgetRequests, 25)
+  assert.equal(calls[0].scopeId, undefined)
+
+  await svc.upsert({ scopeType: 'user', scopeId: 'u-smoke2', budgetRequests: 3, overPolicy: 'reject' })
+  assert.equal(calls[1].id, 'p-user')
+  assert.equal(calls[1].budgetRequests, 3)
+  assert.equal(calls[1].overPolicy, 'reject')
+})
+
+test('upsert 未知范围不传 id（新建）', async () => {
+  const calls: Record<string, unknown>[] = []
+  const { svc } = makeService({
+    listQuotaPolicies: async () => [dayPolicy],
+    upsertQuotaPolicy: async (p: Record<string, unknown>) => { calls.push(p) },
+  })
+  await svc.upsert({ scopeType: 'user', scopeId: 'u-new', budgetRequests: 5 })
+  assert.equal(calls[0].id, undefined)
+  assert.equal(calls[0].scopeType, 'user')
+  assert.equal(calls[0].scopeId, 'u-new')
+})

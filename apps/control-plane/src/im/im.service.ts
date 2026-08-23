@@ -23,8 +23,10 @@ interface TrackedConversation {
 export class ImService implements OnModuleInit, OnModuleDestroy {
   private logger = new Logger('Im')
   private tracked = new Map<string, TrackedConversation>() // taskId → 会话
+  private recentMsgIds = new Map<string, number>() // msgId → expiryMs（防 Stream 重推）
   private sweepTimer?: NodeJS.Timeout
   private readonly sweepMs = 30_000
+  private readonly dedupTtlMs = 10 * 60_000
 
   constructor(
     private readonly users: UsersService,
@@ -42,9 +44,29 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     if (this.sweepTimer) clearInterval(this.sweepTimer)
   }
 
+  /** 同一 msgId 在 TTL 内只处理一次（钉钉未 ack / 多实例竞态的兜底） */
+  private isDuplicateMsg(msgId: string | undefined): boolean {
+    if (!msgId) return false
+    const now = Date.now()
+    if (this.recentMsgIds.size > 2000) {
+      for (const [id, exp] of this.recentMsgIds) {
+        if (exp <= now) this.recentMsgIds.delete(id)
+      }
+    }
+    const exp = this.recentMsgIds.get(msgId)
+    if (exp && exp > now) return true
+    this.recentMsgIds.set(msgId, now + this.dedupTtlMs)
+    return false
+  }
+
   /** 入站消息处理（由 Stream 回调调用，异常不抛出，保证 ack）
    *  sessionWebhook 缺省时（模拟入口）：跳过回复/跟踪，仍走身份解析 + 任务入队 */
   async handleInbound(m: RobotTextMessage): Promise<void> {
+    if (this.isDuplicateMsg(m.msgId)) {
+      this.logger.warn(`skip duplicate IM msgId=${m.msgId}`)
+      return
+    }
+
     const content = (m.text?.content ?? '').replace(/^@[^\s@]+\s*/, '').trim()
     if (!content) return
 
@@ -154,6 +176,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   /** 供测试/调试：伪造一条入站消息（不依赖钉钉 Stream） */
   simulateInbound(m: { text: string; senderStaffId?: string; senderNick?: string; sessionWebhook?: string }): Promise<void> {
     return this.handleInbound({
+      msgId: `sim-${randomUUID()}`,
       senderStaffId: m.senderStaffId ?? 'dev-3001',
       senderNick: m.senderNick ?? '测试',
       conversationId: `cid-test-${randomUUID()}`,

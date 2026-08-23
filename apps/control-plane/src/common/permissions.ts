@@ -15,6 +15,7 @@ export type Permission =
   | 'instance.manage'    // 实例管理
   | 'user.manage'        // 用户管理
   | 'secrets.manage'     // D20 密钥读写（永不返回明文列表）
+  | 'kb.manage'            // 知识库文档与索引管理
 
 export const ROLE_ORDER = ['employee', 'developer', 'admin'] as const
 export type Role = (typeof ROLE_ORDER)[number]
@@ -36,6 +37,7 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'instance.manage': ['admin'],
   'user.manage': ['admin'],
   'secrets.manage': ['admin'],
+  'kb.manage': ['admin'],
 }
 
 export function can(role: Role, permission: Permission): boolean {

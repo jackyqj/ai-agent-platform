@@ -37,7 +37,7 @@ export class AuditStore {
     return record
   }
 
-  async query(f: { userId?: string; sessionId?: string; eventType?: string; from?: string; limit: number }): Promise<AuditEvent[]> {
+  async query(f: { userId?: string; sessionId?: string; eventType?: string; eventTypePrefix?: string; from?: string; limit: number }): Promise<AuditEvent[]> {
     if (this.pg.pool) {
       try {
         return (await this.pg.queryAudit(f)).map((r) => ({
@@ -53,6 +53,7 @@ export class AuditStore {
     if (f.userId) rows = rows.filter((e) => e.userId === f.userId)
     if (f.sessionId) rows = rows.filter((e) => e.sessionId === f.sessionId)
     if (f.eventType) rows = rows.filter((e) => e.eventType === f.eventType)
+    if (f.eventTypePrefix) rows = rows.filter((e) => e.eventType.startsWith(f.eventTypePrefix!))
     if (f.from) rows = rows.filter((e) => e.ts >= f.from!)
     return rows.slice(-f.limit).reverse()
   }

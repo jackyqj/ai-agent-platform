@@ -87,4 +87,20 @@ describe('store-client', () => {
     expect(calls[0].url).toBe('http://x/api/tasks');
     expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant', task: '请假制度是什么' }));
   });
+
+  it('closeSession posts to /sessions/:id/close', async () => {
+    const calls = stubFetch(async () => okJson({ ok: true }));
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.closeSession('sess-1');
+    expect(calls[0].url).toBe('http://x/api/sessions/sess-1/close');
+    expect(calls[0].method).toBe('POST');
+  });
+
+  it('listTasks fetches /tasks', async () => {
+    let seen = '';
+    stubFetch(async (url) => { seen = url; return okJson({ tasks: [] }); });
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.listTasks();
+    expect(seen).toBe('http://x/api/tasks');
+  });
 });

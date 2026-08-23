@@ -7,6 +7,7 @@ export interface Me {
   role: string;
   dept: string;
   permissionMode?: string;
+  permissions?: string[];
 }
 
 export interface ModelRoute {
@@ -153,12 +154,21 @@ export interface ModelsBody {
 // ── app state (what the views render) ────────────────────
 
 export type Route = 'store' | 'admin' | 'chat';
-export type AdminPane = 'workbench' | 'config' | 'investigate';
+export type AdminPane = 'workbench' | 'config' | 'kb' | 'investigate';
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  pending?: boolean;
+}
 
 export interface ChatState {
   sessionId: string | null;
   agentId: string;
   error: string | null;
+  messages: ChatMessage[];
+  historyLoading?: boolean;
+  sending?: boolean;
 }
 
 export interface TaskSubmitResult {
@@ -169,10 +179,13 @@ export interface TaskSubmitResult {
 
 export interface TaskView {
   id: string;
+  agentPresetId?: string;
   status: string;
-  payload: { task: string };
+  payload?: { task: string } | string;
   result?: { finalResponse: string };
   error?: string;
+  createdAt?: string;
+  finishedAt?: string;
 }
 
 export interface SessionDetail {
@@ -193,6 +206,7 @@ export interface AppState {
   agents: Agent[];
   agentBusy: Record<string, boolean>;
   mySessions: SessionRow[];
+  sessionTitles: Record<string, string>;
   schedTasks: ScheduledTask[];
   myApprovals: Approval[];
   schedRuns: ScheduledRunLog[];
@@ -239,6 +253,17 @@ export interface AppState {
   qBudget: string;
   ovDept: string;
   ovPreset: string;
+
+  kbDocuments: KbDocument[];
+  kbStatus: KbStatus | null;
+  kbUploadClass: KbClassification;
+  kbSearchQuery: string;
+  kbSearchDept: string;
+  kbSearchRole: string;
+  kbSearchHits: KbSearchHit[];
+  kbSearchMode: string;
+  kbPendingUpload: File | null;
+  kbAudit: AuditEvent[];
 
   errors: Record<string, string>;
 
@@ -319,4 +344,45 @@ export interface ComposeState {
   revisions: Revision[];
   saving: boolean;
   publishing: boolean;
+}
+
+// ── 知识库管理（kb-admin-design.md）────────────────────────────
+
+export type KbClassification = 'public' | 'internal' | 'confidential';
+
+export interface KbVisibility {
+  classification: KbClassification;
+  departments: string[];
+  roles: string[];
+}
+
+export interface KbDocument {
+  name: string;
+  format: string;
+  sizeBytes: number;
+  updatedAt: string;
+  visibility: KbVisibility;
+  indexed: boolean;
+  chunkCount: number;
+}
+
+export interface KbStatus {
+  documentCount: number;
+  chunkCount: number;
+  indexModel?: string;
+  lastIngestAt?: string;
+  ingestRunning: boolean;
+  ingestError?: string;
+  ingestStartedAt?: string;
+  ingestFinishedAt?: string;
+  ingestLog?: string[];
+}
+
+export interface KbSearchHit {
+  source: string;
+  heading: string;
+  snippet: string;
+  score: number;
+  rerankScore?: number;
+  mode: 'vector' | 'keyword';
 }

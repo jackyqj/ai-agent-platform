@@ -7,16 +7,26 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "ingest": "node dist/ingest.js",
+    "fixtures": "tsx scripts/create-fixtures.ts",
+    "eval": "node --import tsx --test test/eval-top5.spec.ts",
+    "test": "node --import tsx --test test/*.spec.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@pdf-lib/fontkit": "^1.1.1",
     "express": "^4.22.2",
     "hono": "^4.13.2",
+    "mammoth": "^1.12.1",
+    "pdf-parse": "^2.4.5",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.5",
+    "docx": "^9.7.1",
+    "pdf-lib": "^1.17.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

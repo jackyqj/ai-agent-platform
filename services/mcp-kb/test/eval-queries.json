@@ -1,0 +1,48 @@
+[
+  {
+    "query": "出差 报销 上限",
+    "expectedSources": ["报销制度.md"],
+    "user": { "departments": ["HR"], "roles": ["employee"] },
+    "note": "关键词模式：拆分词匹配报销上限"
+  },
+  {
+    "query": "年假有几天",
+    "expectedSources": ["请假制度.md"],
+    "user": { "departments": ["HR"], "roles": ["employee"] },
+    "note": "年假标准"
+  },
+  {
+    "query": "试用期多长",
+    "expectedSources": ["hr-faq.md"],
+    "note": "public FAQ，无需 user"
+  },
+  {
+    "query": "销售折扣权限",
+    "expectedSources": ["sales-playbook.md"],
+    "user": { "departments": ["sales"], "roles": ["employee"] }
+  },
+  {
+    "query": "办公用品申领限额",
+    "expectedSources": ["办公用品申领.pdf"],
+    "user": { "departments": ["HR"], "roles": ["employee"] },
+    "note": "PDF 解析验证"
+  },
+  {
+    "query": "外勤打卡",
+    "expectedSources": ["考勤须知.docx"],
+    "user": { "departments": ["HR"], "roles": ["employee"] },
+    "note": "Word 解析验证"
+  },
+  {
+    "query": "可接受最低毛利",
+    "expectedSources": ["sales-confidential.md"],
+    "user": { "departments": ["sales"], "roles": ["sales-admin"] }
+  },
+  {
+    "query": "可接受最低毛利",
+    "expectedSources": [],
+    "user": { "departments": ["sales"], "roles": ["employee"] },
+    "expectEmpty": true,
+    "note": "权限拒绝：机密文档内容，普通销售不可见"
+  }
+]

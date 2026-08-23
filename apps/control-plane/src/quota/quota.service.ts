@@ -110,11 +110,22 @@ export class QuotaService {
   }
 
   async upsert(input: { id?: string; scopeType: string; scopeId?: string; period?: string; budgetRequests: number; overPolicy?: string }): Promise<void> {
+    const period = input.period ?? 'day'
+    const scopeType = input.scopeType as QuotaPolicy['scopeType']
+    // 「全员」不带 scopeId；user/dept 用传入的 id。同一 (scope, period) 复用已有策略 id，避免每次新建。
+    const scopeId = scopeType === 'all' ? undefined : (input.scopeId?.trim() || undefined)
+    let id = input.id
+    if (!id) {
+      const existing = (await this.policies()).find(
+        (p) => p.scopeType === scopeType && p.scopeId === scopeId && p.period === period,
+      )
+      id = existing?.id
+    }
     await this.pg.upsertQuotaPolicy({
-      id: input.id,
-      scopeType: input.scopeType,
-      scopeId: input.scopeId,
-      period: input.period ?? 'day',
+      id,
+      scopeType,
+      scopeId,
+      period,
       budgetRequests: input.budgetRequests,
       overPolicy: input.overPolicy ?? 'reject',
     })

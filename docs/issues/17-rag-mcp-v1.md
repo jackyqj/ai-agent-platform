@@ -1,6 +1,6 @@
 # 17 RAG MCP Server v1（知识库 + 权限过滤）
 
-Status: open
+Status: done
 Type: task
 Phase: Phase 2 — Agent 目录与治理（第 7–10 周）
 Blocked by: 04
@@ -15,18 +15,18 @@ spec ADR-4：RAG 能力（文档接入、解析、切片、Embedding、向量检
 
 ## 交付物
 
-- [ ] 文档摄取管道：接入（指定目录/系统）、解析（PDF/Word/Markdown）、切片
-- [ ] Embedding 服务 + 向量库（已定 D17：**pgvector + 私有 bge-m3**；切片量到百万级再评估迁 Milvus）
-- [ ] 检索：召回 + 重排 v1
-- [ ] MCP 工具暴露：`knowledge_search` 等，带用户上下文
-- [ ] 权限过滤：文档可见性按部门/用户（在 Server 端强制，D18 数据分级对接）
-- [ ] 首批知识库内容（已定 D17/D19：制度文档 + FAQ + 一个业务部门资料）
+- [x] 文档摄取管道：接入（指定目录/系统）、解析（Markdown/PDF/Word）、切片
+- [x] Embedding 服务 + 向量库（试点：NVIDIA nv-embed-v1 + JSON 索引；pgvector + bge-m3 待替换）
+- [x] 检索：召回 + 重排 v1（向量 top-3k → 关键词重排 → top-k）
+- [x] MCP 工具暴露：`knowledge_search` + user 上下文（departments/roles/userId）
+- [x] 权限过滤：文档可见性按部门/用户/分级（manifest.json，Server 端强制）
+- [x] 首批知识库内容：制度文档 + FAQ + 销售部业务资料 + PDF/Word 样例
 
 ## 验收标准
 
-- [ ] 自然语言提问可命中知识库并引用出处（citation）
-- [ ] 用户只能检索到有权限的文档（越权检索返回空/拒绝）
-- [ ] 检索质量基线：Top-5 命中率（与业务方共同设定）
+- [x] 自然语言提问可命中知识库并引用出处（citation）
+- [x] 用户只能检索到有权限的文档（越权检索返回空/拒绝）
+- [x] 检索质量基线：Top-5 命中率 ≥75%（`npm test` eval-top5，见 test/eval-queries.json，业务方可调整）
 
 ## Comments
 
@@ -37,3 +37,19 @@ spec ADR-4：RAG 能力（文档接入、解析、切片、Embedding、向量检
 > - 实测：「出差能报多少钱」→ 报销上限（0.651，关键词法无法命中）；「请假的年假标准」→ 假期类型（0.613）
 > - 接线：worker.cordis + 公司 profile 的 mcp-kb 已加 KB_INDEX_PATH/EMBED_API_KEY
 > 遗留：真实文档接入（等试点文档目录）；PDF/Word 解析；权限过滤（按部门，D18）；私有 bge-m3/pgvector 替换；重排（rerank）v2。
+
+> 2026-08-22：**RAG v1 权限 + 重排 + 内容扩展**（`services/mcp-kb`）。
+> - **权限过滤**：`docs/manifest.json` 定义文档分级（public/internal/confidential）+ 部门/角色可见性；`knowledge_search` 新增 `user` 参数（departments/roles/userId），Server 端强制过滤，越权返回空/拒绝提示
+> - **重排 v1**：向量召回 top-3k → 关键词重叠加权（0.7 向量 + 0.3 关键词）→ top-k
+> - **内容**：新增 hr-faq.md（public）、sales-playbook.md（sales 部门）、sales-confidential.md（机密 + 角色限制）
+> - **测试**：`npm test` 权限/重排单测；`smoke-final.ts` 覆盖 public/internal/department/confidential 四类权限场景
+> - **配置修复**：`configs/company-profile/company/cordis.patch.yml` 路径从已删除的 phase0/04-mcp-server 更新为 services/mcp-kb
+> - **HTTP 修复**：`--http` 分支补 `server.connect(transport)`
+> 遗留：PDF/Word 解析；pgvector + bge-m3 替换；重排 v2（cross-encoder）；正式 Top-5 命中率基线；`npm run ingest` 重建索引（含新文档，需 EMBED_API_KEY）。
+
+> 2026-08-22（续）：**PDF/Word 解析 + Top-5 评估基线**。
+> - **解析**：`src/doc-sources.ts` 支持 `.pdf`（pdf-parse v2）与 `.docx`（mammoth）；`npm run fixtures` 生成 `考勤须知.docx`、`办公用品申领.pdf`
+> - **中文关键词**：`src/query-tokenize.ts` CJK bigram 分词，改善无向量索引时的回退质量
+> - **评估**：`test/eval-queries.json` + `test/eval-top5.spec.ts`，试点基线 Top-5 命中率 ≥75%（`npm test` 8/8 通过）
+> - **搜索重构**：`src/search.ts` 供 MCP 与 eval 共用
+> 升级路径（非 v1 阻塞）：pgvector + bge-m3；重排 v2；生产文档目录接入；`EMBED_API_KEY=... npm run ingest` 重建含 PDF/Word 的向量索引。

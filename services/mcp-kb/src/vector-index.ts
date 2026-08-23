@@ -3,7 +3,8 @@
  * 试点规模（<1000 切片）用 JSON 索引文件 + 内存余弦检索；pgvector 到位后替换为 PG 存储（接口不变）。
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
+import type { DocVisibility } from './permissions.js'
 
 export interface Chunk {
   id: string
@@ -11,7 +12,11 @@ export interface Chunk {
   heading: string         // 所在章节标题
   text: string
   vector: number[]        // 4096 维（nv-embed-v1）
+  visibility: DocVisibility
 }
+
+/** 旧索引可能缺少 visibility 字段 */
+export type ChunkWithOptionalVisibility = Omit<Chunk, 'visibility'> & { visibility?: DocVisibility }
 
 export interface VectorIndex {
   model: string
@@ -41,6 +46,32 @@ export function searchTopK(index: VectorIndex, queryVec: number[], k: number): {
   return scored
 }
 
+/** 重排 v1：向量召回 top-2k → 关键词重叠加权 → 取 top-k */
+export function rerank(
+  candidates: { chunk: Chunk; score: number }[],
+  query: string,
+  k: number,
+): { chunk: Chunk; score: number; rerankScore: number }[] {
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => t.length >= 2)
+  const VECTOR_WEIGHT = 0.7
+  const KEYWORD_WEIGHT = 0.3
+
+  return candidates
+    .map(({ chunk, score }) => {
+      const lower = chunk.text.toLowerCase()
+      let kwScore = 0
+      for (const t of tokens) {
+        if (lower.includes(t)) kwScore += 1
+        if (chunk.heading.toLowerCase().includes(t)) kwScore += 0.5
+      }
+      const normalizedKw = tokens.length > 0 ? kwScore / tokens.length : 0
+      const rerankScore = VECTOR_WEIGHT * score + KEYWORD_WEIGHT * normalizedKw
+      return { chunk, score, rerankScore }
+    })
+    .sort((a, b) => b.rerankScore - a.rerankScore)
+    .slice(0, k)
+}
+
 function cosineSafe(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0
   for (let i = 0; i < a.length; i++) {
@@ -51,7 +82,7 @@ function cosineSafe(a: number[], b: number[]): number {
   return na === 0 || nb === 0 ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb))
 }
 
-/** 文档切块：按章节/段落切 ~500 字切片（v1；PDF/Word 解析在 17 完整版） */
+/** 文档切块：按 Markdown 章节或 ~500 字段落切分（PDF/Word 解析后同样适用） */
 export function chunkDocument(source: string, text: string): { heading: string; text: string }[] {
   const lines = text.split(/\r?\n/)
   const out: { heading: string; text: string }[] = []

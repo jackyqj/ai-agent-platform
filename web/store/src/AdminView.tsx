@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { type Actions } from './useApp';
 import AgentComposeView from './AgentComposeView';
+import { KB_ALLOWED_EXT, KB_MAX_BYTES } from './kb-utils';
 import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge, RunStatusBadge } from './ui';
 import { fmtTs, shortId } from './util';
-import type { AdminPane, AppState } from './types';
+import type { AdminPane, AppState, KbClassification, KbVisibility } from './types';
 
-const TABS: { id: AdminPane; label: string; hash: string }[] = [
-  { id: 'workbench', label: '工作台', hash: '#admin' },
-  { id: 'config', label: '配置', hash: '#admin/config' },
-  { id: 'investigate', label: '调查', hash: '#admin/investigate' },
+const TABS: { id: AdminPane; label: string; desc: string; hash: string }[] = [
+  { id: 'workbench', label: '工作台', desc: '待办 · 用量 · 实例', hash: '#admin' },
+  { id: 'config', label: '配置', desc: 'Agent · 配额 · 权限', hash: '#admin/config' },
+  { id: 'kb', label: '知识库', desc: '文档 · 索引 · 试搜', hash: '#admin/kb' },
+  { id: 'investigate', label: '调查', desc: '用户 · 会话 · 审计', hash: '#admin/investigate' },
 ];
 
 const PRESETS = ['assistant', 'hr-assistant', 'report-builder', 'doc-search'];
@@ -19,18 +21,20 @@ const PERMS = ['read-only', 'workspace-write', 'danger-full-access'];
 interface Props {
   state: AppState;
   act: Actions;
+  kbOnly?: boolean;
 }
 
 type Pending =
   | { kind: 'disable'; id: string; name: string }
   | { kind: 'unpublish'; id: string; name: string }
   | { kind: 'delete'; id: string; name: string }
+  | { kind: 'kb-delete'; name: string }
   | { kind: 'stop'; id: string }
   | { kind: 'reap' };
 
-export default function AdminView({ state, act }: Props) {
+export default function AdminView({ state, act, kbOnly = false }: Props) {
   const [pending, setPending] = useState<Pending | null>(null);
-  const pane = state.adminPane;
+  const pane = kbOnly ? 'kb' : state.adminPane;
 
   if (state.compose) return <AgentComposeView state={state} act={act} />;
 
@@ -51,6 +55,9 @@ export default function AdminView({ state, act }: Props) {
       case 'delete':
         void act.removeAgent(pending.id);
         break;
+      case 'kb-delete':
+        void act.deleteKb(pending.name);
+        break;
       case 'stop':
         void act.stopInstance(pending.id);
         break;
@@ -65,27 +72,17 @@ export default function AdminView({ state, act }: Props) {
     setPending(null);
   }
 
-  return (
-    <div>
-      <div className="page-head">
-        <h1>管理后台</h1>
-        <div className="sub">工作台处理待办，配置管目录与配额，调查查会话与审计</div>
-      </div>
-      <div className="indexbar" role="tablist">
-        {TABS.map((t) => (
-          <a
-            key={t.id}
-            role="tab"
-            aria-selected={pane === t.id}
-            href={t.hash}
-            className={pane === t.id ? 'active' : ''}
-            onClick={(e) => { e.preventDefault(); setPane(t.id, t.hash); }}
-          >
-            {t.label}
-          </a>
-        ))}
-      </div>
+  const kbOverwriteBar = state.kbPendingUpload ? (
+    <ConfirmBar
+      body={`文件「${state.kbPendingUpload.name}」已存在，确认覆盖？`}
+      confirmLabel="覆盖上传"
+      onConfirm={() => void act.confirmKbUpload()}
+      onCancel={() => act.update({ kbPendingUpload: null })}
+    />
+  ) : null;
 
+  const confirmBars = (
+    <>
       {pending ? (
         <ConfirmBar
           body={confirmBody(pending)}
@@ -94,32 +91,94 @@ export default function AdminView({ state, act }: Props) {
           onCancel={() => setPending(null)}
         />
       ) : null}
+      {kbOverwriteBar}
+    </>
+  );
 
-      {pane === 'workbench' ? (
-        <>
-          <ApprovalsSection state={state} act={act} />
-          <StatsSection state={state} />
-          <InstancesSection state={state} act={act} onStop={(id) => setPending({ kind: 'stop', id })} onReap={() => setPending({ kind: 'reap' })} />
-        </>
-      ) : null}
-      {pane === 'config' ? (
-        <>
-          <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} onRemove={(id, name) => setPending({ kind: 'delete', id, name })} />
-          {<ScheduledSection state={state} />}
-          <QuotaSection state={state} act={act} />
-          <RbacSection state={state} act={act} />
-          <RolesSection state={state} act={act} />
-          <ModelsSection state={state} />
-        </>
-      ) : null}
-      {pane === 'investigate' ? (
-        <>
-          <UsersSection state={state} act={act} onDisable={(id, name) => setPending({ kind: 'disable', id, name })} />
-          <SessionsInvestigate state={state} act={act} />
-          <AuditSection state={state} act={act} />
-        </>
-      ) : null}
+  if (kbOnly) {
+    return (
+      <div className="admin admin--kb-only">
+        <header className="admin-hero">
+          <p className="eyebrow">内容管理</p>
+          <h1>知识库</h1>
+          <p className="lead">维护助手可检索的制度与文档：上传、定权限、重建索引，并用试搜核对结果。</p>
+        </header>
+        {confirmBars}
+        <div className="admin-pane">
+          <KbDesk state={state} act={act} onDelete={(name) => setPending({ kind: 'kb-delete', name })} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin">
+      <header className="admin-hero">
+        <p className="eyebrow">运维控制台</p>
+        <h1>管理后台</h1>
+        <p className="lead">工作台处理待办与实例，配置管目录与配额，知识库管语料，调查查会话与审计。</p>
+      </header>
+      <nav className="admin-tabs admin-tabs--4" role="tablist" aria-label="管理分区">
+        {TABS.map((t) => (
+          <a
+            key={t.id}
+            role="tab"
+            aria-selected={pane === t.id}
+            aria-label={t.label}
+            href={t.hash}
+            className={'admin-tab' + (pane === t.id ? ' active' : '')}
+            onClick={(e) => { e.preventDefault(); setPane(t.id, t.hash); }}
+          >
+            <span className="admin-tab-label">{t.label}</span>
+            <span className="admin-tab-desc">{t.desc}</span>
+          </a>
+        ))}
+      </nav>
+
+      {confirmBars}
+
+      <div className="admin-pane" key={pane}>
+        {pane === 'workbench' ? (
+          <div className="admin-workbench">
+            <ApprovalsSection state={state} act={act} />
+            <StatsSection state={state} />
+            <InstancesSection state={state} act={act} onStop={(id) => setPending({ kind: 'stop', id })} onReap={() => setPending({ kind: 'reap' })} />
+          </div>
+        ) : null}
+        {pane === 'config' ? (
+          <>
+            <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} onRemove={(id, name) => setPending({ kind: 'delete', id, name })} />
+            <ScheduledSection state={state} />
+            <QuotaSection state={state} act={act} />
+            <RbacSection state={state} act={act} />
+            <RolesSection state={state} act={act} />
+            <ModelsSection state={state} />
+          </>
+        ) : null}
+        {pane === 'kb' ? (
+          <KbDesk state={state} act={act} onDelete={(name) => setPending({ kind: 'kb-delete', name })} />
+        ) : null}
+        {pane === 'investigate' ? (
+          <>
+            <UsersSection state={state} act={act} onDisable={(id, name) => setPending({ kind: 'disable', id, name })} />
+            <SessionsInvestigate state={state} act={act} />
+            <AuditSection state={state} act={act} />
+          </>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function AdminSection({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
+  return (
+    <section className="section admin-panel">
+      <div className="section-title">
+        <h2>{title}</h2>
+        {meta ? <span className="section-meta">{meta}</span> : null}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -131,6 +190,8 @@ function confirmBody(p: Pending): string {
       return `下架「${p.name}」后，新会话将无法选用。存量会话不受影响。`;
     case 'delete':
       return `删除「${p.name}」会清掉定义与 preset 文件，新会话不可选。存量会话靠 DSH 保留。`;
+    case 'kb-delete':
+      return `删除知识库文档「${p.name}」后需重建索引才能从检索中移除向量切片。`;
     case 'stop':
       return '回收该实例会断开用户当前对话。';
     case 'reap':
@@ -150,6 +211,8 @@ function confirmLabel(p: Pending): string {
       return '确认下架';
     case 'delete':
       return '确认删除';
+    case 'kb-delete':
+      return '确认删除文档';
     case 'stop':
       return '确认回收';
     case 'reap':
@@ -164,40 +227,41 @@ function confirmLabel(p: Pending): string {
 function ApprovalsSection({ state, act }: Props) {
   const pend = state.approvals;
   return (
-    <section className="section">
-      <h2 className="plain-head">待审批</h2>
+    <AdminSection title="待审批" meta={pend.length ? `${pend.length} 条` : undefined}>
       {pend.length === 0 ? (
         <Empty>无待审批</Empty>
       ) : (
-        <table>
-          <thead><tr><th>请求人</th><th>操作</th><th>级别</th><th>动作</th></tr></thead>
-          <tbody>
-            {pend.map((a) => (
-              <tr key={a.id}>
-                <td className="mono">{shortId(a.requesterUserId)}</td>
-                <td>{a.action}</td>
-                <td className="mono">
-                  {a.chain && a.chain.length > 1 ? `manager ${(a.currentLevel ?? 0) + 1}/${a.chain.length} → ${a.chain[(a.currentLevel ?? 0)]}` : a.level}
-                </td>
-                <td>
-                  <span className="row" style={{ gap: 6 }}>
-                    <button className="ok small" onClick={() => void act.decide(a.id, true)}>批准</button>
-                    <button className="danger small" onClick={() => void act.decide(a.id, false)}>拒绝</button>
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>请求人</th><th>操作</th><th>级别</th><th>动作</th></tr></thead>
+            <tbody>
+              {pend.map((a) => (
+                <tr key={a.id}>
+                  <td className="mono">{shortId(a.requesterUserId)}</td>
+                  <td>{a.action}</td>
+                  <td className="mono">
+                    {a.chain && a.chain.length > 1 ? `manager ${(a.currentLevel ?? 0) + 1}/${a.chain.length} → ${a.chain[(a.currentLevel ?? 0)]}` : a.level}
+                  </td>
+                  <td>
+                    <span className="row" style={{ gap: 6 }}>
+                      <button className="ok small" onClick={() => void act.decide(a.id, true)}>批准</button>
+                      <button className="danger small" onClick={() => void act.decide(a.id, false)}>拒绝</button>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </section>
+    </AdminSection>
   );
 }
 
 function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpublish: (id: string, name: string) => void; onRemove: (id: string, name: string) => void }) {
   const [chainDrafts, setChainDrafts] = useState<Record<string, string>>({});
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">Agent 管理</h2>
 
       <div className="row" style={{ marginBottom: 10 }}>
@@ -254,22 +318,35 @@ function StatsSection({ state }: { state: AppState }) {
   const s = state.stats?.stats;
   if (!s) {
     return (
-      <section className="section">
-        <h2 className="plain-head">用量</h2>
+      <AdminSection title="用量">
         {state.errors.stats ? <LoadError msg={state.errors.stats} /> : <Empty>加载中…</Empty>}
-      </section>
+      </AdminSection>
     );
   }
   return (
-    <section className="section">
-      <h2 className="plain-head">用量</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <Badge tone="b-cloud">{'任务 ' + s.totals.tasks}</Badge>
-        <Badge tone="b-off">{'失败 ' + s.totals.failed}</Badge>
-        <Badge tone="b-dim">{'待审批 ' + s.totals.pendingApprovals}</Badge>
-        {s.totals.quotaOpenAlerts ? <Badge tone="b-warn">{'配额告警 ' + s.totals.quotaOpenAlerts}</Badge> : null}
+    <AdminSection title="用量">
+      <div className="metric-grid">
+        <div className="metric-tile">
+          <span className="metric-value">{s.totals.tasks}</span>
+          <span className="metric-label">任务</span>
+        </div>
+        <div className="metric-tile metric-tile--warn">
+          <span className="metric-value">{s.totals.failed}</span>
+          <span className="metric-label">失败</span>
+        </div>
+        <div className="metric-tile">
+          <span className="metric-value">{s.totals.pendingApprovals}</span>
+          <span className="metric-label">待审批</span>
+        </div>
+        {s.totals.quotaOpenAlerts ? (
+          <div className="metric-tile metric-tile--alert">
+            <span className="metric-value">{s.totals.quotaOpenAlerts}</span>
+            <span className="metric-label">配额告警</span>
+          </div>
+        ) : null}
       </div>
-      <table>
+      <div className="table-wrap" style={{ marginTop: 16 }}>
+        <table>
         <thead><tr><th>助手</th><th className="num">总数</th><th className="num">失败</th></tr></thead>
         <tbody>
           {(s.tasksByAgent || []).map((a, i) => (
@@ -277,16 +354,17 @@ function StatsSection({ state }: { state: AppState }) {
           ))}
         </tbody>
       </table>
+      </div>
       {s.recentErrors?.length ? (
         <div className="msg">{'最近失败：' + s.recentErrors.map((e) => e.id + ' ' + String(e.error || '').slice(0, 40)).join('；')}</div>
       ) : null}
-    </section>
+    </AdminSection>
   );
 }
 
 function ScheduledSection({ state }: { state: AppState }) {
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">定时任务</h2>
       {state.allSched.length === 0 ? (
         <Empty>无定时任务</Empty>
@@ -330,7 +408,7 @@ function ScheduledSection({ state }: { state: AppState }) {
 
 function QuotaSection({ state, act }: Props) {
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">配额策略</h2>
       {state.quotas.length === 0 ? (
         <Empty>无策略</Empty>
@@ -391,7 +469,7 @@ function UsersSection({ state, act, onDisable }: Props & { onDisable: (id: strin
   const rows = state.users.filter((u) =>
     !q || u.id.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || (u.dept || '').toLowerCase().includes(q));
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">用户 <span className="hint">{state.users.length + ' 人'}</span></h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="筛姓名 / 部门 / id" value={state.userFilter} onChange={(e) => act.update({ userFilter: e.target.value })} />
@@ -439,7 +517,7 @@ function UsersSection({ state, act, onDisable }: Props & { onDisable: (id: strin
 
 function SessionsInvestigate({ state, act }: Props) {
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">会话与事件</h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="userId" value={state.sessUser} onChange={(e) => act.update({ sessUser: e.target.value })} />
@@ -498,25 +576,19 @@ function EventsPane({ state }: { state: AppState }) {
 function InstancesSection({ state, act, onStop, onReap }: Props & { onStop: (id: string) => void; onReap: () => void }) {
   const r = state.instances;
   return (
-    <section className="section">
-      <h2 className="plain-head">实例</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <button className="ghost" onClick={() => void act.loadAdminData()}>刷新</button>
-        <button className="danger" onClick={onReap}>回收空闲</button>
+    <AdminSection title="实例" meta={r ? `live ${r.count}` : undefined}>
+      <div className="row admin-toolbar">
+        <LiveDot active={(r?.count ?? 0) > 0} />
+        <button className="ghost small" onClick={() => void act.loadAdminData()}>刷新</button>
+        <button className="danger small" onClick={onReap}>回收空闲</button>
       </div>
       {!r ? (
         state.errors.instances ? <LoadError msg={state.errors.instances} /> : <Empty>加载中…</Empty>
+      ) : r.instances.length === 0 ? (
+        <Empty>无实例</Empty>
       ) : (
-        <div>
-          <div className="row" style={{ marginBottom: 10 }}>
-            <LiveDot active={r.count > 0} />
-            <span className="mono" style={{ color: 'var(--text-dim)' }}>{'live ' + r.count}</span>
-            <Badge tone="b-dim">{'列表 ' + r.instances.length}</Badge>
-          </div>
-          {r.instances.length === 0 ? (
-            <Empty>无实例</Empty>
-          ) : (
-            <table>
+        <div className="table-wrap">
+          <table>
               <thead><tr><th>id</th><th>用户</th><th>地址</th><th>状态</th><th>心跳</th><th></th></tr></thead>
               <tbody>
                 {r.instances.map((i) => (
@@ -531,10 +603,9 @@ function InstancesSection({ state, act, onStop, onReap }: Props & { onStop: (id:
                 ))}
               </tbody>
             </table>
-          )}
         </div>
       )}
-    </section>
+    </AdminSection>
   );
 }
 
@@ -542,7 +613,7 @@ function RbacSection({ state, act }: Props) {
   const r = state.rbac;
   const overlays = r ? Object.entries(r.deptOverlays || {}) : [];
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">权限</h2>
       <div className="msg" style={{ margin: '0 0 8px' }}>
         角色默认：员工 workspace-write；开发者/管理员 danger-full-access。新会话生效，改角色会回收旧实例。
@@ -575,7 +646,7 @@ function RolesSection({ state, act }: Props) {
   const f = state.roleForm;
   const options = state.permKeys.length ? state.permKeys : [];
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">角色 <span className="hint">自定义角色（权限点组合 + DSH 沙箱）</span></h2>
       {state.roleDefs.length === 0 ? (
         <Empty>无自定义角色（预置 employee/developer/admin）</Empty>
@@ -621,10 +692,196 @@ function RolesSection({ state, act }: Props) {
   );
 }
 
+function KbDesk({ state, act, onDelete }: Props & { onDelete: (name: string) => void }) {
+  const st = state.kbStatus;
+  const [editName, setEditName] = useState<string | null>(null);
+  const [editVis, setEditVis] = useState<KbVisibility>({ classification: 'internal', departments: ['*'], roles: [] });
+
+  function startEdit(name: string, vis: KbVisibility) {
+    setEditName(name);
+    setEditVis({ ...vis, departments: [...vis.departments], roles: [...vis.roles] });
+  }
+
+  return (
+    <div className="kb-desk">
+      <AdminSection title="索引状态" meta={st?.ingestRunning ? '重建中' : undefined}>
+        {state.errors.kb ? <LoadError msg={state.errors.kb} /> : null}
+        <div className="metric-grid kb-metrics">
+          <div className="metric-tile">
+            <span className="metric-value">{st ? st.documentCount : '—'}</span>
+            <span className="metric-label">文档</span>
+          </div>
+          <div className="metric-tile">
+            <span className="metric-value">{st ? st.chunkCount : '—'}</span>
+            <span className="metric-label">切片</span>
+          </div>
+          <div className={'metric-tile' + (st?.ingestRunning ? ' metric-tile--warn' : '')}>
+            <span className="metric-value mono" style={{ fontSize: 'var(--text-base)' }}>
+              {st?.ingestRunning ? '重建中' : (st?.indexModel || '未索引')}
+            </span>
+            <span className="metric-label">{st?.lastIngestAt ? '上次 ' + fmtTs(st.lastIngestAt) : '索引模型'}</span>
+          </div>
+        </div>
+        <div className="admin-toolbar kb-toolbar">
+          <button className="ok" onClick={() => void act.triggerKbIngest()} disabled={st?.ingestRunning}>
+            {st?.ingestRunning ? '正在重建…' : '重建索引'}
+          </button>
+          {st?.ingestError ? <span className="msg err">{st.ingestError}</span> : null}
+        </div>
+        {st?.ingestLog && st.ingestLog.length > 0 ? (
+          <pre className="mono ingest-log">{st.ingestLog.join('\n')}</pre>
+        ) : null}
+      </AdminSection>
+
+      <AdminSection title="文档" meta={state.kbDocuments.length ? `${state.kbDocuments.length} 篇` : undefined}>
+        <div className="kb-upload">
+          <label className="kb-upload-field">
+            <span className="kb-upload-label">上传文件</span>
+            <input
+              type="file"
+              accept={KB_ALLOWED_EXT.join(',')}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void act.uploadKb(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <label className="kb-upload-field">
+            <span className="kb-upload-label">默认分级</span>
+            <select value={state.kbUploadClass} onChange={(e) => act.update({ kbUploadClass: e.target.value as KbClassification })}>
+              <option value="public">public</option>
+              <option value="internal">internal</option>
+              <option value="confidential">confidential</option>
+            </select>
+          </label>
+          <p className="hint kb-upload-hint">
+            {'支持 ' + KB_ALLOWED_EXT.join('、') + '，单文件不超过 ' + Math.round(KB_MAX_BYTES / 1024 / 1024) + 'MB'}
+          </p>
+        </div>
+
+        {state.kbDocuments.length === 0 ? (
+          <Empty>暂无文档。上传后记得重建索引。</Empty>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>文件名</th><th>格式</th><th>分级</th><th>部门</th><th>索引</th><th></th></tr></thead>
+              <tbody>
+                {state.kbDocuments.map((d) => (
+                  <tr key={d.name}>
+                    <td className="mono">{d.name}</td>
+                    <td className="mono">{d.format}</td>
+                    <td>
+                      <Badge tone={d.visibility.classification === 'confidential' ? 'b-danger' : d.visibility.classification === 'public' ? 'b-ok' : 'b-warn'}>
+                        {d.visibility.classification}
+                      </Badge>
+                    </td>
+                    <td className="mono">{(d.visibility.departments || []).join(', ') || '—'}</td>
+                    <td className="mono">{d.indexed ? `${d.chunkCount} 片` : '未索引'}</td>
+                    <td>
+                      <span className="row" style={{ gap: 6 }}>
+                        <button className="ghost small" type="button" onClick={() => startEdit(d.name, d.visibility)}>权限</button>
+                        <button className="danger small" type="button" onClick={() => onDelete(d.name)}>删除</button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {editName ? (
+          <div className="kb-perm-editor">
+            <div className="section-title">
+              <h3>编辑权限</h3>
+              <span className="section-meta mono">{editName}</span>
+            </div>
+            <div className="kb-perm-grid">
+              <label>
+                分级
+                <select value={editVis.classification} onChange={(e) => setEditVis({ ...editVis, classification: e.target.value as KbClassification })}>
+                  <option value="public">public</option>
+                  <option value="internal">internal</option>
+                  <option value="confidential">confidential</option>
+                </select>
+              </label>
+              <label>
+                部门（逗号分隔，* 表示全员）
+                <input value={editVis.departments.join(', ')} onChange={(e) => setEditVis({ ...editVis, departments: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+              </label>
+              <label>
+                角色（逗号分隔，机密文档必填）
+                <input value={editVis.roles.join(', ')} onChange={(e) => setEditVis({ ...editVis, roles: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+              </label>
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button className="ok" onClick={() => { void act.saveKbVisibility(editName, editVis).then(() => setEditName(null)); }}>保存权限</button>
+              <button className="ghost" type="button" onClick={() => setEditName(null)}>取消</button>
+            </div>
+          </div>
+        ) : null}
+      </AdminSection>
+
+      <div className="kb-secondary">
+        <AdminSection title="试搜" meta={state.kbSearchMode || undefined}>
+          <div className="kb-search-form">
+            <input placeholder="检索问题" value={state.kbSearchQuery} onChange={(e) => act.update({ kbSearchQuery: e.target.value })} />
+            <input placeholder="模拟部门" value={state.kbSearchDept} onChange={(e) => act.update({ kbSearchDept: e.target.value })} />
+            <input placeholder="模拟角色" value={state.kbSearchRole} onChange={(e) => act.update({ kbSearchRole: e.target.value })} />
+            <button onClick={() => void act.runKbSearch()}>搜索</button>
+          </div>
+          {state.kbSearchHits.length === 0 ? (
+            <Empty>输入问题试搜，核对权限与召回。</Empty>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>来源</th><th>章节</th><th>分数</th><th>摘要</th></tr></thead>
+                <tbody>
+                  {state.kbSearchHits.map((h, i) => (
+                    <tr key={i}>
+                      <td className="mono">{h.source}</td>
+                      <td>{h.heading}</td>
+                      <td className="mono">{h.rerankScore?.toFixed(3) ?? h.score.toFixed(3)}</td>
+                      <td>{h.snippet.slice(0, 120)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </AdminSection>
+
+        <AdminSection title="变更审计" meta={state.kbAudit.length ? `${state.kbAudit.length} 条` : undefined}>
+          {state.kbAudit.length === 0 ? (
+            <Empty>暂无 KB 审计记录</Empty>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>时间</th><th>用户</th><th>事件</th><th>详情</th></tr></thead>
+                <tbody>
+                  {state.kbAudit.map((ev, i) => (
+                    <tr key={i}>
+                      <td className="mono">{fmtTs(ev.ts)}</td>
+                      <td className="mono">{ev.userId ?? '—'}</td>
+                      <td className="mono">{ev.eventType}</td>
+                      <td className="mono">{JSON.stringify(ev.payload ?? {})}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </AdminSection>
+      </div>
+    </div>
+  );
+}
+
 function ModelsSection({ state }: { state: AppState }) {
   const r = state.models;
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">模型配置（只读）</h2>
       {!r ? (
         state.errors.models ? <LoadError msg={state.errors.models} /> : <Empty>加载中…</Empty>
@@ -657,7 +914,7 @@ function ModelsSection({ state }: { state: AppState }) {
 
 function AuditSection({ state, act }: Props) {
   return (
-    <section className="section">
+    <section className="section admin-panel">
       <h2 className="plain-head">审计</h2>
       <div className="row" style={{ marginBottom: 8 }}>
         <input placeholder="userId" value={state.auditUser} onChange={(e) => act.update({ auditUser: e.target.value })} />

@@ -3,6 +3,7 @@ import { AuthGuard } from '../common/auth.guard.js'
 import { AuthService } from './auth.service.js'
 import { UsersService } from '../users/users.service.js'
 import { PermissionPolicyService } from '../common/permission-policy.service.js'
+import { RolesService } from '../common/roles.service.js'
 import { loadConfig } from '../config/config.js'
 
 @Controller()
@@ -11,6 +12,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly users: UsersService,
     private readonly policies: PermissionPolicyService,
+    private readonly roles: RolesService,
   ) {}
 
   /** dev 模式登录（仅本地；生产必须 CP_AUTH_MODE=oidc） */
@@ -54,6 +56,13 @@ export class AuthController {
   me(@Req() req: { user: { sub: string } }) {
     const u = this.users.get(req.user.sub)
     if (!u) throw new HttpException('user not found', HttpStatus.NOT_FOUND)
-    return { id: u.id, name: u.name, dept: u.dept, role: u.role, permissionMode: this.policies.resolve(u.role, u.dept) }
+    return {
+      id: u.id,
+      name: u.name,
+      dept: u.dept,
+      role: u.role,
+      permissionMode: this.policies.resolve(u.role, u.dept),
+      permissions: this.roles.permissionsOf(u.role),
+    }
   }
 }

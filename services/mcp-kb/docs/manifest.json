@@ -1,0 +1,55 @@
+{
+  "报销制度.md": {
+    "classification": "internal",
+    "departments": [
+      "*"
+    ],
+    "roles": []
+  },
+  "请假制度.md": {
+    "classification": "internal",
+    "departments": [
+      "*"
+    ],
+    "roles": []
+  },
+  "hr-faq.md": {
+    "classification": "public",
+    "departments": [
+      "*"
+    ],
+    "roles": []
+  },
+  "sales-playbook.md": {
+    "classification": "internal",
+    "departments": [
+      "sales",
+      "management"
+    ],
+    "roles": []
+  },
+  "sales-confidential.md": {
+    "classification": "confidential",
+    "departments": [
+      "sales"
+    ],
+    "roles": [
+      "sales-admin",
+      "management"
+    ]
+  },
+  "考勤须知.docx": {
+    "classification": "internal",
+    "departments": [
+      "*"
+    ],
+    "roles": []
+  },
+  "办公用品申领.pdf": {
+    "classification": "public",
+    "departments": [
+      "*"
+    ],
+    "roles": []
+  }
+}

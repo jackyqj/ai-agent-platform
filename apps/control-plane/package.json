@@ -7,7 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "node --import tsx --test src/secrets/*.test.ts src/users/*.test.ts src/sessions/*.test.ts src/instances/*.test.ts src/admin/*.test.ts src/common/*.test.ts src/keys/*.test.ts src/agents/*.test.ts src/quota/*.test.ts src/scheduled/*.test.ts src/approvals/*.test.ts"
+    "test": "node --import tsx --test src/secrets/*.test.ts src/users/*.test.ts src/sessions/*.test.ts src/instances/*.test.ts src/admin/*.test.ts src/common/*.test.ts src/keys/*.test.ts src/agents/*.test.ts src/quota/*.test.ts src/scheduled/*.test.ts src/approvals/*.test.ts src/kb/*.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

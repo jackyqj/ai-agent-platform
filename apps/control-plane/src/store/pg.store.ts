@@ -33,7 +33,7 @@ export class PgStore {
     return res.rows[0]
   }
 
-  async queryAudit(f: { userId?: string; sessionId?: string; eventType?: string; from?: string; limit: number }): Promise<AuditRow[]> {
+  async queryAudit(f: { userId?: string; sessionId?: string; eventType?: string; eventTypePrefix?: string; from?: string; limit: number }): Promise<AuditRow[]> {
     const p = this.pool!
     const where: string[] = []
     const args: unknown[] = []
@@ -48,6 +48,10 @@ export class PgStore {
     if (f.eventType) {
       args.push(f.eventType)
       where.push(`event_type = $${args.length}`)
+    }
+    if (f.eventTypePrefix) {
+      args.push(f.eventTypePrefix + '%')
+      where.push(`event_type LIKE $${args.length}`)
     }
     if (f.from) {
       args.push(f.from)
@@ -226,13 +230,13 @@ export class PgStore {
   async listTasks(userId?: string, limit = 50) {
     const res = userId
       ? await this.pool!.query(
-          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", status, error,
+          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error,
                   created_at AS "createdAt", finished_at AS "finishedAt"
            FROM tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
           [userId, limit],
         )
       : await this.pool!.query(
-          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", status, error,
+          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error,
                   created_at AS "createdAt", finished_at AS "finishedAt"
            FROM tasks ORDER BY created_at DESC LIMIT $1`,
           [limit],
@@ -545,14 +549,36 @@ export class PgStore {
     id?: string; scopeType: string; scopeId?: string; period: string
     budgetRequests: number; overPolicy: string
   }): Promise<void> {
-    const id = p.id ?? undefined
+    const scopeId = p.scopeId ?? null
+    // Prefer explicit id; otherwise update the existing row for (scope, period).
+    // UNIQUE index uq_quota_policies_scope_period (migration 013) prevents races.
+    if (p.id) {
+      const byId = await this.pool!.query(
+        `UPDATE quota_policies
+         SET scope_type = $2, scope_id = $3, period = $4, budget_requests = $5, over_policy = $6
+         WHERE id = $1
+         RETURNING id`,
+        [p.id, p.scopeType, scopeId, p.period, p.budgetRequests, p.overPolicy],
+      )
+      if ((byId.rowCount ?? 0) > 0) return
+    }
+    const updated = await this.pool!.query(
+      `UPDATE quota_policies
+       SET budget_requests = $4, over_policy = $5
+       WHERE id = (
+         SELECT id FROM quota_policies
+         WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2 AND period = $3
+         ORDER BY created_at ASC
+         LIMIT 1
+       )
+       RETURNING id`,
+      [p.scopeType, scopeId, p.period, p.budgetRequests, p.overPolicy],
+    )
+    if ((updated.rowCount ?? 0) > 0) return
     await this.pool!.query(
       `INSERT INTO quota_policies (id, scope_type, scope_id, period, budget_requests, over_policy)
-       VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO UPDATE SET
-         scope_type = excluded.scope_type, scope_id = excluded.scope_id, period = excluded.period,
-         budget_requests = excluded.budget_requests, over_policy = excluded.over_policy`,
-      [id ?? null, p.scopeType, p.scopeId ?? null, p.period, p.budgetRequests, p.overPolicy],
+       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)`,
+      [p.id ?? null, p.scopeType, scopeId, p.period, p.budgetRequests, p.overPolicy],
     )
   }
 

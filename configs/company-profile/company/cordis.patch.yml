@@ -63,10 +63,10 @@
     serverName: kb
     transport: stdio
     command: node
-    args: ['/Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/dist/index.js']
+    args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
     env:
-      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/docs
-      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/phase0/04-mcp-server/data/index.json
+      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
+      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
       EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
 #
 # Phase 1+ 服务化升级：streamable-http（SDK HTTP 路径修复后启用，见 04 README 已知问题）

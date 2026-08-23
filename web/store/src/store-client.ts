@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, KbClassification, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -34,6 +34,8 @@ export interface Client {
   listSessions(): Promise<{ sessions: SessionRow[] }>;
   createSession(agentPresetId: string): Promise<{ sessionId: string; routingSecret: string }>;
   getSession(id: string): Promise<{ id: string; status: string; agentPresetId: string }>;
+  closeSession(id: string): Promise<{ ok: boolean }>;
+  listTasks(): Promise<{ tasks: TaskView[] }>;
   submitTask(agentPresetId: string, task: string): Promise<TaskSubmitResult>;
   getTask(id: string): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
@@ -88,6 +90,14 @@ export interface Client {
     upsertRole(body: { name: string; permissions: string[]; dshPreset: string }): Promise<{ ok: boolean; roles: RoleDef[] }>;
     removeRole(name: string): Promise<{ ok: boolean; roles: RoleDef[] }>;
     setApprovalChain(id: string, roles: string[]): Promise<{ roles: string[] }>;
+    kbDocuments(): Promise<{ documents: KbDocument[] }>;
+    kbStatus(): Promise<KbStatus>;
+    uploadKbDocument(name: string, contentBase64: string, visibility: Partial<KbVisibility>): Promise<{ ok: boolean; document: KbDocument }>;
+    patchKbVisibility(name: string, visibility: Partial<KbVisibility>): Promise<{ ok: boolean; visibility: KbVisibility }>;
+    deleteKbDocument(name: string): Promise<{ ok: boolean }>;
+    triggerKbIngest(): Promise<{ ok: boolean; startedAt: string }>;
+    kbSearch(body: { query: string; limit?: number; user?: { departments?: string[]; roles?: string[] } }): Promise<{ hits: KbSearchHit[]; mode: string }>;
+    kbAudit(limit?: number): Promise<{ events: AuditEvent[] }>;
   };
 }
 
@@ -150,6 +160,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     listSessions: () => request<{ sessions: SessionRow[] }>('/sessions'),
     createSession: (agentPresetId) => request<{ sessionId: string; routingSecret: string }>('/sessions', { method: 'POST', body: { agentPresetId } }),
     getSession: (id) => request<{ id: string; status: string; agentPresetId: string }>(`/sessions/${id}`),
+    closeSession: (id) => request<{ ok: boolean }>(`/sessions/${id}/close`, { method: 'POST', body: {} }),
+    listTasks: () => request<{ tasks: TaskView[] }>('/tasks'),
     submitTask: (agentPresetId, task) => request<TaskSubmitResult>('/tasks', { method: 'POST', body: { agentPresetId, task } }),
     getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
@@ -201,6 +213,14 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       upsertRole: (body) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles', { method: 'POST', body }),
       removeRole: (name) => request<{ ok: boolean; roles: RoleDef[] }>('/admin/roles/' + encodeURIComponent(name), { method: 'DELETE' }),
       setApprovalChain: (id, roles) => request<{ roles: string[] }>('/admin/agents/' + id + '/approval-chain', { method: 'PUT', body: { roles } }),
+      kbDocuments: () => request<{ documents: KbDocument[] }>('/admin/kb/documents'),
+      kbStatus: () => request<KbStatus>('/admin/kb/status'),
+      uploadKbDocument: (name, contentBase64, visibility) => request('/admin/kb/documents', { method: 'POST', body: { name, contentBase64, visibility } }),
+      patchKbVisibility: (name, visibility) => request('/admin/kb/documents/' + encodeURIComponent(name) + '/visibility', { method: 'PATCH', body: visibility }),
+      deleteKbDocument: (name) => request('/admin/kb/documents/' + encodeURIComponent(name), { method: 'DELETE' }),
+      triggerKbIngest: () => request('/admin/kb/ingest', { method: 'POST', body: {} }),
+      kbSearch: (body) => request('/admin/kb/search', { method: 'POST', body }),
+      kbAudit: (limit = 50) => request('/admin/kb/audit', { query: { limit: String(limit) } }),
     },
   };
 }

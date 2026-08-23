@@ -15,6 +15,8 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     listSessions: vi.fn(async () => ({ sessions: [] })),
     createSession: vi.fn(async () => ({ sessionId: 's1', routingSecret: 'secret-should-stay-hidden' })),
     getSession: vi.fn(async () => ({ id: 's1', status: 'active', agentPresetId: 'assistant' })),
+    closeSession: vi.fn(async () => ({ ok: true })),
+    listTasks: vi.fn(async () => ({ tasks: [] })),
     submitTask: vi.fn(async () => ({ taskId: 't1', status: 'queued', awaitingApproval: false })),
     getTask: vi.fn(async () => ({
       task: { id: 't1', status: 'done', payload: { task: '你好' }, result: { finalResponse: '好的' } },
@@ -64,6 +66,14 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
       upsertRole: vi.fn(async () => ({ ok: true, roles: [] })),
       removeRole: vi.fn(async () => ({ ok: true, roles: [] })),
       setApprovalChain: vi.fn(async () => ({ roles: [] })),
+      kbDocuments: vi.fn(async () => ({ documents: [] })),
+      kbStatus: vi.fn(async () => ({ documentCount: 0, chunkCount: 0, ingestRunning: false })),
+      uploadKbDocument: vi.fn(async () => ({ ok: true, document: { name: 't.md', format: 'md', sizeBytes: 1, updatedAt: '', visibility: { classification: 'internal', departments: ['*'], roles: [] }, indexed: false, chunkCount: 0 } })),
+      patchKbVisibility: vi.fn(async () => ({ ok: true, visibility: { classification: 'internal', departments: ['*'], roles: [] } })),
+      deleteKbDocument: vi.fn(async () => ({ ok: true })),
+      triggerKbIngest: vi.fn(async () => ({ ok: true, startedAt: new Date().toISOString() })),
+      kbSearch: vi.fn(async () => ({ hits: [], mode: 'none' })),
+      kbAudit: vi.fn(async () => ({ events: [] })),
     },
     ...overrides,
   };
@@ -201,14 +211,18 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '申请新助手' })).toBeInTheDocument();
   });
 
-  it('splits admin into workbench, config, and investigate', async () => {
+  it('splits admin into workbench, config, knowledge, and investigate', async () => {
     const user = await loginAs(fakeClient());
     await user.click(screen.getByRole('link', { name: '管理' }));
     expect(screen.getByRole('tab', { name: '工作台' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '配置' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '知识库' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '调查' })).toBeInTheDocument();
-    expect(screen.getByText('待审批')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '待审批' })).toBeInTheDocument();
     expect(screen.queryByText('审计查询')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: '知识库' }));
+    expect(screen.getByRole('heading', { name: '索引状态' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '文档' })).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: '调查' }));
     expect(screen.getByText('审计')).toBeInTheDocument();
   });
@@ -230,6 +244,55 @@ describe('App', () => {
     expect(client.admin.patchUser).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '确认禁用' }));
     await waitFor(() => expect(client.admin.patchUser).toHaveBeenCalledWith('u-hr-1', { status: 'disabled' }));
+  });
+
+  it('shows knowledge base nav for kb.manage custom role', async () => {
+    const user = userEvent.setup();
+    const client = fakeClient({
+      me: vi.fn(async () => ({ id: 'u-hr-1', name: 'HR', role: 'kb-editor', dept: '人事', permissions: ['kb.manage'] })),
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+    });
+    render(<App client={client} />);
+    await expandDevLogin(user);
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await waitFor(() => expect(screen.getByRole('link', { name: '知识库' })).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: '管理' })).not.toBeInTheDocument();
+  });
+
+  it('loads chat history when continuing a conversation', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listSessions: vi.fn(async () => ({
+        sessions: [{ id: 'sess-2', userId: 'u-admin', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+      })),
+      listTasks: vi.fn(async () => ({
+        tasks: [{
+          id: 't-old',
+          agentPresetId: 'assistant',
+          status: 'done',
+          payload: { task: '请问年假有多少天' },
+          result: { finalResponse: '你好，有什么可以帮你？' },
+          createdAt: '2026-08-21T00:00:00Z',
+        }],
+      })),
+    });
+    const user = await loginAs(client);
+    expect(screen.getByText('通用助手 · 年假有多少天')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /继续.*通用助手 · 年假有多少天/ }));
+    await waitFor(() => expect(screen.getByText('你好，有什么可以帮你？')).toBeInTheDocument());
+    expect(client.listTasks).toHaveBeenCalled();
+  });
+
+  it('deletes a conversation from the sidebar', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listSessions: vi.fn(async () => ({
+        sessions: [{ id: 'sess-del', userId: 'u-admin', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+      })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: /删除.*通用助手/ }));
+    await waitFor(() => expect(client.closeSession).toHaveBeenCalledWith('sess-del'));
   });
 
   it('shows session events beside the session table', async () => {

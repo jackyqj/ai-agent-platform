@@ -76,7 +76,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // 传用户部门让 dept 级策略（user→dept→all）能被命中。
     const quota = await this.quota.checkAndRecord(userId, user?.dept)
     if (quota.blocked) {
-      throw new Error(`配额已用尽：${quota.used}/${quota.budget}（${quota.policy!.period}）`)
+      const message = `配额已用尽：${quota.used}/${quota.budget}（${quota.policy!.period}）`
+      // 已落库的 queued 行若不标失败，前端历史会当成「执行中」重复展示
+      await this.patchRecord(record.id, { status: 'failed', error: message, finished: true })
+      throw new Error(message)
     }
     const gate = await this.approvals.gateTask(userId, agentPresetId, taskText, record.id)
     if (gate.granted) {

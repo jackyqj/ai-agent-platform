@@ -4,7 +4,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { PgStore } from '../store/pg.store.js'
 import {
-  can as builtinCan, isDshPresetName, isPermission, isRole, ROLE_DSH_PRESET,
+  can as builtinCan, isDshPresetName, isPermission, isRole, PERMISSIONS, ROLE_DSH_PRESET,
   type DshPresetName, type Permission,
 } from './permissions.js'
 
@@ -50,6 +50,14 @@ export class RolesService implements OnModuleInit {
   can(role: string, permission: Permission): boolean {
     if (isRole(role)) return builtinCan(role, permission)
     return this.cache.get(role)?.permissions.includes(permission) ?? false
+  }
+
+  /** 角色拥有的全部权限点（预置角色展开矩阵；自定义角色取存储集合） */
+  permissionsOf(role: string): Permission[] {
+    if (isRole(role)) {
+      return (Object.keys(PERMISSIONS) as Permission[]).filter((p) => builtinCan(role, p))
+    }
+    return this.cache.get(role)?.permissions ?? []
   }
 
   dshPresetOf(role: string): DshPresetName {

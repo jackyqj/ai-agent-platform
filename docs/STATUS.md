@@ -24,7 +24,7 @@
 
 | 工单 | 现状 | 阻塞 |
 |---|---|---|
-| 03 模型网关 | LiteLLM compose + 混合路由配置就绪；**私有路由 env 化（Qwen 端点即插即用）** | 云端路由密钥、网关实际部署验收 |
+| 03 模型网关 | LiteLLM 网关已部署并实测（podman-compose 起，宿主端口 4001，避开控制面 4000）；**云端路由 + DSH 经网关跑通任务**（`cloud/deepseek→deepseek-v4-flash`，网关日志 `POST /v1/chat/completions 200`，任务 `turn/end completed`）；**网关 master key 已独立化并落 `GATEWAY_KEY` 到 D20 vault**（新 master 200 / 旧 DS_API_KEY 400 分离，vault 回读一致）；**任务 worker 已接网关**（`worker.cordis.yml` `apiKeyEnv=GATEWAY_KEY`、`worker.ts` 默认 baseURL=网关/模型=`cloud/deepseek`，运行时经网关实测 200）；私有路由 env 化（Qwen 即插即用）；profile 默认模型已切 `gateway/cloud-deepseek` | 私有 vLLM 未起（未测私路由）；用量日志回调未启用；D18 网关路由守卫未实装；交互端 Web 实例复验待做；**运行中的 worker 需重启**以加载网关默认端点/模型 |
 | 05 试点运行 | 材料包（指引/样例/反馈模板）就绪；**M0 已达成**（工具调用端到端） | **种子用户名单**、真人试用 |
 
 ## ⬜ 未开始（后续阶段）

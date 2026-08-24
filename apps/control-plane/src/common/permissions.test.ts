@@ -6,6 +6,7 @@ test('employee cannot manage users or instances; admin can', () => {
   assert.equal(can('employee', 'user.manage'), false)
   assert.equal(can('employee', 'instance.manage'), false)
   assert.equal(can('employee', 'agent.propose'), true)
+  assert.equal(can('employee', 'graph.publish'), false)
   assert.equal(can('admin', 'user.manage'), true)
   assert.equal(can('developer', 'audit.view'), false)
 })

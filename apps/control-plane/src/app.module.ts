@@ -15,10 +15,11 @@ import { AdminModule } from './admin/admin.module.js'
 import { AuditController } from './audit/audit.controller.js'
 import { StatsController } from './stats/stats.controller.js'
 import { KbModule } from './kb/kb.module.js'
+import { CatalogModule } from './catalog/catalog.module.js'
 import { ProxyController } from './proxy/proxy.controller.js'
 
 @Module({
-  imports: [CommonModule, SecretsModule, AuthModule, UsersModule, SessionsModule, InstancesModule, AgentsModule, KeysModule, TasksModule, QuotaModule, ScheduledModule, ImModule, AdminModule, KbModule],
+  imports: [CommonModule, SecretsModule, AuthModule, UsersModule, SessionsModule, InstancesModule, AgentsModule, KeysModule, TasksModule, QuotaModule, ScheduledModule, ImModule, AdminModule, KbModule, CatalogModule],
   controllers: [AuditController, StatsController, ProxyController],
 })
 export class AppModule {}

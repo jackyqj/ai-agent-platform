@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { type Actions } from './useApp';
 import AgentComposeView from './AgentComposeView';
+import GraphComposeView from './GraphComposeView';
 import { KB_ALLOWED_EXT, KB_MAX_BYTES } from './kb-utils';
 import { Badge, ConfirmBar, Empty, LiveDot, LoadError, permBadge, RunStatusBadge } from './ui';
 import { fmtTs, shortId } from './util';
@@ -37,6 +38,7 @@ export default function AdminView({ state, act, kbOnly = false }: Props) {
   const pane = kbOnly ? 'kb' : state.adminPane;
 
   if (state.compose) return <AgentComposeView state={state} act={act} />;
+  if (state.graphCompose) return <GraphComposeView state={state} act={act} />;
 
   function setPane(id: AdminPane, hash: string) {
     act.update({ adminPane: id });
@@ -148,6 +150,7 @@ export default function AdminView({ state, act, kbOnly = false }: Props) {
         {pane === 'config' ? (
           <>
             <AgentsSection state={state} act={act} onUnpublish={(id, name) => setPending({ kind: 'unpublish', id, name })} onRemove={(id, name) => setPending({ kind: 'delete', id, name })} />
+            <CatalogSection state={state} act={act} />
             <ScheduledSection state={state} />
             <QuotaSection state={state} act={act} />
             <RbacSection state={state} act={act} />
@@ -310,6 +313,70 @@ function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpubl
           })}
         </div>
       )}
+    </section>
+  );
+}
+
+function CatalogSection({ state, act }: Props) {
+  const cf = state.connForm;
+  const tf = state.toolForm;
+  const gf = state.graphForm;
+  return (
+    <section className="section admin-panel">
+      <h2 className="plain-head">连接器 / 工具 / 组合图 <span className="hint">管理员上架，员工只选用</span></h2>
+      <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+        <input placeholder="连接器 id" value={cf.id} onChange={(e) => act.update({ connForm: { ...cf, id: e.target.value } })} />
+        <input placeholder="名称" value={cf.name} onChange={(e) => act.update({ connForm: { ...cf, name: e.target.value } })} />
+        <select value={cf.kind} onChange={(e) => act.update({ connForm: { ...cf, kind: e.target.value } })}>
+          <option value="http">http</option>
+          <option value="postgres">postgres</option>
+        </select>
+        <input placeholder="vault secretRef" value={cf.secretRef} onChange={(e) => act.update({ connForm: { ...cf, secretRef: e.target.value } })} />
+        {cf.kind === 'postgres' ? (
+          <input placeholder="表白名单 schema.table,…" value={cf.tables} onChange={(e) => act.update({ connForm: { ...cf, tables: e.target.value } })} />
+        ) : (
+          <input placeholder="https://api.example.com" value={cf.baseUrl} onChange={(e) => act.update({ connForm: { ...cf, baseUrl: e.target.value } })} />
+        )}
+        <button className="ok" onClick={() => void act.saveConnector()}>保存连接器</button>
+      </div>
+      {state.connectors.map((c) => (
+        <div key={c.id} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+          <span>{c.name} <span className="mono">{c.id}</span> <Badge tone="b-cloud">{c.status}</Badge></span>
+          {c.status === 'published' ? null : <button className="ok small" onClick={() => void act.publishConnector(c.id)}>发布</button>}
+        </div>
+      ))}
+      <div className="row" style={{ margin: '12px 0 8px', flexWrap: 'wrap', gap: 8 }}>
+        <input placeholder="工具 id" value={tf.id} onChange={(e) => act.update({ toolForm: { ...tf, id: e.target.value } })} />
+        <select value={tf.connectorId} onChange={(e) => act.update({ toolForm: { ...tf, connectorId: e.target.value } })}>
+          <option value="">连接器</option>
+          {state.connectors.map((c) => <option key={c.id} value={c.id}>{c.id}</option>)}
+        </select>
+        <input placeholder="显示名" value={tf.name} onChange={(e) => act.update({ toolForm: { ...tf, name: e.target.value } })} />
+        <input placeholder="HTTP path /v1/…" value={tf.path} onChange={(e) => act.update({ toolForm: { ...tf, path: e.target.value } })} />
+        <button className="ok" onClick={() => void act.saveTool()}>保存工具</button>
+      </div>
+      {state.catalogTools.map((t) => (
+        <div key={t.id} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+          <span>{t.name || t.id} → {t.connectorId} <Badge tone="b-cloud">{t.status}</Badge></span>
+          {t.status === 'published' ? null : <button className="ok small" onClick={() => void act.publishTool(t.id)}>发布</button>}
+        </div>
+      ))}
+      <div className="row" style={{ margin: '12px 0 8px', flexWrap: 'wrap', gap: 8 }}>
+        <input placeholder="图 id" value={gf.id} onChange={(e) => act.update({ graphForm: { ...gf, id: e.target.value } })} />
+        <input placeholder="名称" value={gf.name} onChange={(e) => act.update({ graphForm: { ...gf, name: e.target.value } })} />
+        <button className="ok" onClick={() => void act.saveGraphProduct()}>新建并编排</button>
+      </div>
+      {state.allGraphs.map((g) => (
+        <div key={g.id} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+          <span>{g.name} <span className="mono">{g.id}</span> <Badge tone="b-cloud">{g.status ?? 'draft'}</Badge></span>
+          <span className="row" style={{ gap: 6 }}>
+            <button className="ghost small" onClick={() => void act.openGraphCompose(g.id)}>编排</button>
+            {g.status === 'published'
+              ? <button className="danger small" onClick={() => void act.unpublishGraphProduct(g.id)}>下架</button>
+              : <button className="ok small" onClick={() => void act.publishGraphProduct(g.id)}>上架</button>}
+          </span>
+        </div>
+      ))}
     </section>
   );
 }

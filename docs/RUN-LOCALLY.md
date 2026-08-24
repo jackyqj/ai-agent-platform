@@ -1,9 +1,9 @@
 # 本地跑起来 · 完整指引
 
-把平台（控制面 + 任务 Worker + 两个 MCP Server + 商店 UI）在本地跑起来，体验完整闭环。
+把平台（模型网关 + 控制面 + 任务 Worker + 两个 MCP Server + 商店 UI）在本地跑起来，体验完整闭环。
 
 > 环境事实：macOS，Node v26.5.0，pnpm 11.21；podman 容器运行时；`adaptix-postgres`（PG16）/`adaptix-redis` 已在运行。
-> 模型：NVIDIA OpenAI 兼容端点（`deepseek-ai/deepseek-v4-flash-0731`），API key 由你提供（生产走 D20 密钥服务）。
+> 模型：LiteLLM 网关（`configs/gateway/`，podman-compose 起，宿主端口 4001）做混合路由；云端路由 `cloud/deepseek` 走 DeepSeek 官方 `deepseek-v4-flash`（API key 用 `DS_API_KEY`，生产走 D20 密钥服务）；私有路由 `private/qwen-72b` 需 GPU/vLLM（D13）。
 > 仓库布局（2025-08 迁移后）：控制面 `apps/control-plane`、知识库 MCP `services/mcp-kb`、数据库 MCP `services/mcp-db`、商店 UI `web/store`、迁移在 `apps/control-plane/migrations`。
 
 ## 0. 前置
@@ -12,8 +12,9 @@
 node -v            # ^22.19 || >=24
 pnpm -v            # >=11.7
 podman info        # 容器运行时（需要能拉镜像/起容器）
-# NVIDIA key（模型调用用；不写进任何文件，运行时 env 传递）
-export NVIDIA_KEY='nvapi-...'   # 仅旧 NVIDIA 路径；当前默认 DeepSeek 官方（DS_API_KEY）
+# 模型密钥（网关/直连二选一；不写进任何文件，运行时 env 传递）
+export NVIDIA_KEY='nvapi-...'   # 仅旧 NVIDIA 路径；当前默认 DeepSeek 官方（DS_API_KEY，见「模型网关」节）
+export DEEPSEEK_API_KEY=''      # 云端 key；用 DS_API_KEY 的话无需再设（见 .env）
 export PG_DSN='postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
 ```
 
@@ -26,7 +27,7 @@ PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可�
 # 迁移（幂等，可重复执行）——迁移脚本在控制面包内
 CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < apps/control-plane/migrations/001_init.sql
-... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql ... 007_users.sql ... 008_agent_composition.sql ... 009_quota_alerts.sql ... 010_scheduled_extra.sql ... 011_role_definitions.sql ... 012_multilevel_approval.sql
+... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql ... 007_users.sql ... 008_agent_composition.sql ... 009_quota_alerts.sql ... 010_scheduled_extra.sql ... 011_role_definitions.sql ... 012_multilevel_approval.sql ... 013_quota_policy_unique.sql ... 014_composite_catalog.sql ... 015_graph_revisions.sql
 # 样例数据（试点报表场景）
 podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < services/mcp-db/seed.sql   #（或按 mcp-db README 手建 demo_sales）
@@ -66,23 +67,53 @@ curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application
   http://127.0.0.1:4000/api/admin/im/simulate   # sessionWebhook 指向自建 sink 可捕获回推
 ```
 
-## 3. 启动任务 Worker（真实执行 Agent 任务）
+## 3. 模型网关（LiteLLM，03 工单；推荐）
+
+模型统一走网关混合路由（私有 vLLM + 云端 API），DSH/运行时只连网关这一个 OpenAI 兼容端点。
+
+```sh
+cd configs/gateway
+# 密钥（云端路由可直接用 apps/control-plane/.env 里的 DS_API_KEY；不落盘明文）
+export LITELLM_MASTER_KEY="sk-lm-master-$(openssl rand -hex 8)"   # 网关管理密钥
+export DEEPSEEK_API_KEY="$DS_API_KEY"                             # 云端 DeepSeek（可用你的 DS_API_KEY）
+# export DASHSCOPE_API_KEY=sk-...                                 # 可选：cloud/qwen-plus 路由
+export LITELLM_PORT=4001                                          # 宿主端口，避开控制面 4000
+# 私有路由（有独立 Qwen 才配；无 GPU 就只起 litellm）
+# export VLLM_BASE_URL='http://<你的Qwen服务>:8000/v1'  export VLLM_MODEL='Qwen/Qwen2.5-72B-Instruct'  export VLLM_API_KEY=...
+
+podman-compose up -d litellm     # 云端优先；GPU 就绪后再 up -d vllm
+
+# 校验
+curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"cloud/deepseek","messages":[{"role":"user","content":"你好"}]}'
+```
+
+> 要点：容器内固定监听 4000，宿主端口由 `LITELLM_PORT` 决定（默认 4001，避免与控制面 4000 冲突）。
+> DSH 侧若与网关同网络用 `http://litellm:4000/v1`，否则用宿主地址 `http://127.0.0.1:${LITELLM_PORT:-4001}/v1`。
+> **鉴权**：网关 master key 独立（不要复用 `DS_API_KEY`）；把 `LITELLM_MASTER_KEY` 作为 `GATEWAY_KEY` 写入 D20 vault
+> （`curl -X PUT http://127.0.0.1:4000/api/admin/secrets/GATEWAY_KEY -H "Authorization: Bearer $ADMIN_JWT" -d '{"value":"<master>"}'`），
+> 交互实例（profile `llm-pi-ai` `apiKeyEnv: GATEWAY_KEY`）据此鉴权；任务 worker 若要经网关，需把 `llm-deepseek.apiKeyEnv` 改为 `GATEWAY_KEY` 且 `DEEPSEEK_BASE_URL` 指向网关。
+
+## 4. 启动任务 Worker（真实执行 Agent 任务）
 
 ```sh
 cd dsh-source/packages/platform/task-worker   # dsh-source 为仓库内 vendor 源码
 export DSH_HOME="$REPO_ROOT/.dsh-home"
 export DATABASE_URL="$PG_DSN"
-# 模型密钥由 D20 vault 按请求解析（.env 的 DS_API_KEY 启动时写入 vault）：
-# worker 把 DATABASE_URL + SECRETS_MASTER_KEY 传给运行时，不再注入 DEEPSEEK_API_KEY
-export DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
-export DSH_MODEL="${DS_API_MODEL:-deepseek-v4-flash}"
+# 任务经 LiteLLM 网关（03 工单）：worker.cordis.yml 用 apiKeyEnv=GATEWAY_KEY（vault 存的网关 master key），
+# 模型/端点默认已指向网关（worker.ts 默认 cloud/deepseek + http://127.0.0.1:4001/v1）。
+# 覆盖为按需（若需直连 DeepSeek 则：DEEPSEEK_BASE_URL=https://api.deepseek.com DSH_MODEL=deepseek-v4-flash，并回退 apiKeyEnv=DEEPSEEK_API_KEY）
+export DSH_MODEL="${DSH_MODEL:-cloud/deepseek}"
+# export DEEPSEEK_BASE_URL=http://127.0.0.1:4001/v1    # 默认已是网关，可省
 ./node_modules/.bin/tsx src/worker.ts
-# → [worker] ready (..., model=deepseek-v4-flash)
+# → [worker] ready (..., model=cloud/deepseek, baseURL=http://127.0.0.1:4001/v1)
 ```
 
 Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`，内含知识库/数据库两个 MCP Server）。
 
-## 4. 启动商店 UI（Vite + React + TS）
+## 5. 启动商店 UI（Vite + React + TS）
 
 ```sh
 cd web/store
@@ -99,7 +130,7 @@ npm run dev          # Vite 开发服务器 → http://127.0.0.1:5173
 > 测试：`npm test`（Vitest + React Testing Library）。构建：`npm run build` → `dist/`
 > （静态产物需由同一 origin 反代 `/api` 到 `:4000`）。
 
-## 5. 演示流程
+## 6. 演示流程
 
 ### A. 商店浏览与选用
 - UI 里输入 `u-admin` → 登录
@@ -135,7 +166,7 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 - 打开 http://127.0.0.1:5173/#admin，用 `u-admin` 登录（或商店页顶部「管理」导航）
 - **3 步找会话**：用户表点「会话」→ 会话表点一行 → 下方事件摘要
 - 禁用 `u-hr-1`：其实例立即回收；该用户再调 API 返回 401 `user disabled`
-- 模型配置为只读（03 网关未部署）；审计区可按 userId / sessionId / eventType 过滤
+- 模型配置为只读展示（03 网关已在 4001 部署；管理后台 v1 的模型配置暂为只读，未接网关流量配置）；审计区可按 userId / sessionId / eventType 过滤
 
 ### F. 集中凭据 HTTP resolve（09 工单）
 - 交互 Web 实例**不持** `SECRETS_MASTER_KEY` / `CP_JWT_SECRET`；按请求 `GET /api/internal/secrets/:ref`（`X-API-Key` + scope `secrets:resolve`）
@@ -143,7 +174,7 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 - 审计：`eventType=secrets.resolve`，payload 只有 `ref` / `source` / `configured`（无明文）
 - podman 容器把 `CP_SECRETS_URL` 设成宿主机可达地址（如 `http://host.containers.internal:4000/api/internal/secrets`）
 
-## 6. 常用配置（env）
+## 7. 常用配置（env）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -162,16 +193,17 @@ curl http://127.0.0.1:4000/api/admin/tasks -H "Authorization: Bearer $ADMIN_JWT"
 | `CP_SECRETS_TOKEN` | dev: `cp_dev_secrets_resolve` | 实例 HTTP resolve 的 API key（scope `secrets:resolve`） |
 | `CP_SECRETS_URL` | `http://127.0.0.1:$CP_PORT/api/internal/secrets` | 容器内 resolve 基址；docker/podman 需改成宿主机可达 URL |
 
-## 7. 停止与清理
+## 8. 停止与清理
 
 ```sh
 pkill -f "node dist/main.js"; pkill -f "tsx src/worker.ts"; pkill -f "http.server 8080"
+cd configs/gateway && podman-compose down        # 模型网关（litellm/vllm）
 # 演示数据保留在 PG（tasks/approval_requests/agent_presets）；清库可 TRUNCATE 或重建 control_plane 库
 ```
 
 ## 已知注意点（2025-08-19 实测记录）
 
-1. **模型工具调用合规性**：deepseek-v4-flash-0731（NVIDIA）行为不稳定——部分轮次"假装调用工具、编造输出"（会话事件 tool/call=0）。管线与工具注册正常；若遇到编造答案，换模型（llama-3.3-70b 或私有 Qwen）或加强 persona。这是试点前需解决的模型选型问题（D13 GPU 到位后回归）。
+1. **模型工具调用合规性**：早期 `deepseek-v4-flash-0731`（NVIDIA NIM）行为不稳定——部分轮次"假装调用工具、编造输出"（会话事件 tool/call=0），已弃用。当前默认 DeepSeek 官方 `deepseek-v4-flash`（经网关 `cloud/deepseek` 路由），预期更稳；若仍遇编造，换模型（llama-3.3-70b 或私有 Qwen，`private/qwen-72b`）或加强 persona。私有 Qwen（D13）到位后应回归此测（03 工单）。
 2. **多轮工具任务耗时**：3-5+ 分钟（慢模型×多轮）；默认 5min 超时可能不够，建议 `CP_TASK_TIMEOUT_MS=600000`。
 3. **同用户串行**：per-worker 进程内保证；多 worker 部署需 per-user 队列分区（当前单 worker 假设）。
 4. **沙箱环境**（本机开发）：`DSH_HOME` 指到工作区内的 `.dsh-home`。

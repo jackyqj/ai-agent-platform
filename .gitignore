@@ -21,3 +21,4 @@ node_modules/
 # pnpm / npm 本地缓存
 .pnpm-store/
 .npm-cache/
+services/mcp-kb/docs/

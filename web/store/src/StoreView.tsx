@@ -1,8 +1,7 @@
 import { type Actions } from './useApp';
-import { resolveSessionTitle } from './chat-utils';
 import { Badge, Empty, RunStatusBadge } from './ui';
 import { fmtTs } from './util';
-import type { Agent, AppState, SessionRow } from './types';
+import type { Agent, AppState, GraphProduct, SessionRow } from './types';
 
 export default function StoreView({ state, act }: { state: AppState; act: Actions }) {
   const hasSidebar = state.mySessions.length > 0 || state.myApprovals.some((a) => a.status === 'pending');
@@ -26,6 +25,24 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
                 {state.agents.map((a, i) => <AgentCard key={a.id} a={a} index={i} state={state} act={act} />)}
               </div>
             )}
+          </section>
+
+          <section className="section">
+            <SectionTitle title="组合产品" meta={state.graphs.length ? `${state.graphs.length} 个` : undefined} />
+            {state.graphs.length === 0 ? (
+              <Empty>暂无已上架的多智能体组合。由管理员在配置里编排并发布。</Empty>
+            ) : (
+              <div className="agents">
+                {state.graphs.map((g, i) => <GraphCard key={g.id} g={g} index={i} state={state} act={act} />)}
+              </div>
+            )}
+            {state.lastGraphRun ? (
+              <div className="msg" style={{ marginTop: 12 }}>
+                最近运行 {state.lastGraphRun.status}
+                {state.lastGraphRun.error ? `：${state.lastGraphRun.error}` : ''}
+                {state.lastGraphRun.result ? ` → ${state.lastGraphRun.result.slice(0, 240)}` : ''}
+              </div>
+            ) : null}
           </section>
         </main>
 
@@ -163,6 +180,31 @@ function SessionRowButton({ s, label, act }: { s: SessionRow; label: string; act
         <button className="danger small" aria-label={`删除 ${label}`} onClick={() => void act.deleteSession(s.id)}>删除</button>
       </span>
     </li>
+  );
+}
+
+function GraphCard({ g, index, state, act }: { g: GraphProduct; index: number; state: AppState; act: Actions }) {
+  const busy = state.graphBusy[g.id];
+  const task = state.graphTask[g.id] ?? '';
+  return (
+    <article className="agent motion-item" style={{ animationDelay: `${Math.min(index, 8) * 0.06}s` }}>
+      <header className="agent-head">
+        <h3>{g.name}</h3>
+        <div className="meta">
+          <Badge tone="b-cloud">组合</Badge>
+        </div>
+      </header>
+      <p className="desc">{g.description || '管理员编排的多智能体流程'}</p>
+      <textarea
+        rows={2}
+        placeholder="输入任务…"
+        value={task}
+        onChange={(e) => act.update({ graphTask: { ...state.graphTask, [g.id]: e.target.value } })}
+      />
+      <div className="foot">
+        <button disabled={!!busy} onClick={() => void act.runGraph(g.id)}>{busy ? '运行中…' : '运行'}</button>
+      </div>
+    </article>
   );
 }
 

@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, Instance, KbClassification, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -31,12 +31,15 @@ export interface Client {
   me(): Promise<Me>;
 
   listAgents(): Promise<{ agents: Agent[] }>;
+  listGraphs(): Promise<{ graphs: GraphProduct[] }>;
+  runGraph(id: string, task: string): Promise<{ run: GraphRunView }>;
+  getGraphRun(id: string): Promise<{ run: GraphRunView }>;
   listSessions(): Promise<{ sessions: SessionRow[] }>;
   createSession(agentPresetId: string): Promise<{ sessionId: string; routingSecret: string }>;
   getSession(id: string): Promise<{ id: string; status: string; agentPresetId: string }>;
   closeSession(id: string): Promise<{ ok: boolean }>;
   listTasks(): Promise<{ tasks: TaskView[] }>;
-  submitTask(agentPresetId: string, task: string): Promise<TaskSubmitResult>;
+  submitTask(agentPresetId: string, task: string, sessionId?: string): Promise<TaskSubmitResult>;
   getTask(id: string): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
 
@@ -98,6 +101,21 @@ export interface Client {
     triggerKbIngest(): Promise<{ ok: boolean; startedAt: string }>;
     kbSearch(body: { query: string; limit?: number; user?: { departments?: string[]; roles?: string[] } }): Promise<{ hits: KbSearchHit[]; mode: string }>;
     kbAudit(limit?: number): Promise<{ events: AuditEvent[] }>;
+    connectors(): Promise<{ connectors: ConnectorView[] }>;
+    putConnector(id: string, body: unknown): Promise<{ connector: ConnectorView }>;
+    publishConnector(id: string): Promise<{ notice: string }>;
+    tools(): Promise<{ tools: CatalogToolView[] }>;
+    putTool(id: string, body: unknown): Promise<{ tool: CatalogToolView }>;
+    publishTool(id: string): Promise<{ notice: string }>;
+    graphs(): Promise<{ graphs: GraphProduct[] }>;
+    getGraph(id: string): Promise<{ graph: GraphProduct }>;
+    putGraph(id: string, body: { name: string; description?: string; visibility?: unknown; spec: GraphSpec }): Promise<{ graph: GraphProduct; notice: string }>;
+    publishGraph(id: string): Promise<{ graph: GraphProduct; notice: string }>;
+    unpublishGraph(id: string): Promise<{ notice: string }>;
+    graphRevisions(id: string): Promise<{ revisions: GraphRevision[] }>;
+    rollbackGraph(id: string, toVersion: number): Promise<{ graph: GraphProduct; notice: string }>;
+    trialGraph(id: string, task: string): Promise<{ run: GraphRunView }>;
+    latestGraphRun(id: string): Promise<{ run: GraphRunView | null }>;
   };
 }
 
@@ -157,12 +175,19 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     me: () => request<Me>('/me'),
 
     listAgents: () => request<{ agents: Agent[] }>('/agents'),
+    listGraphs: () => request<{ graphs: GraphProduct[] }>('/graphs'),
+    runGraph: (id, task) => request<{ run: GraphRunView }>(`/graphs/${id}/run`, { method: 'POST', body: { task } }),
+    getGraphRun: (id) => request<{ run: GraphRunView }>(`/graph-runs/${id}`),
     listSessions: () => request<{ sessions: SessionRow[] }>('/sessions'),
     createSession: (agentPresetId) => request<{ sessionId: string; routingSecret: string }>('/sessions', { method: 'POST', body: { agentPresetId } }),
     getSession: (id) => request<{ id: string; status: string; agentPresetId: string }>(`/sessions/${id}`),
     closeSession: (id) => request<{ ok: boolean }>(`/sessions/${id}/close`, { method: 'POST', body: {} }),
     listTasks: () => request<{ tasks: TaskView[] }>('/tasks'),
-    submitTask: (agentPresetId, task) => request<TaskSubmitResult>('/tasks', { method: 'POST', body: { agentPresetId, task } }),
+    submitTask: (agentPresetId, task, sessionId) =>
+      request<TaskSubmitResult>('/tasks', {
+        method: 'POST',
+        body: { agentPresetId, task, ...(sessionId ? { sessionId } : {}) },
+      }),
     getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
 
@@ -221,6 +246,21 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       triggerKbIngest: () => request('/admin/kb/ingest', { method: 'POST', body: {} }),
       kbSearch: (body) => request('/admin/kb/search', { method: 'POST', body }),
       kbAudit: (limit = 50) => request('/admin/kb/audit', { query: { limit: String(limit) } }),
+      connectors: () => request('/admin/connectors'),
+      putConnector: (id, body) => request(`/admin/connectors/${id}`, { method: 'PUT', body }),
+      publishConnector: (id) => request(`/admin/connectors/${id}/publish`, { method: 'POST', body: {} }),
+      tools: () => request('/admin/tools'),
+      putTool: (id, body) => request(`/admin/tools/${id}`, { method: 'PUT', body }),
+      publishTool: (id) => request(`/admin/tools/${id}/publish`, { method: 'POST', body: {} }),
+      graphs: () => request('/admin/graphs'),
+      getGraph: (id) => request(`/admin/graphs/${id}`),
+      putGraph: (id, body) => request(`/admin/graphs/${id}`, { method: 'PUT', body }),
+      publishGraph: (id) => request(`/admin/graphs/${id}/publish`, { method: 'POST', body: {} }),
+      unpublishGraph: (id) => request(`/admin/graphs/${id}/unpublish`, { method: 'POST', body: {} }),
+      graphRevisions: (id) => request(`/admin/graphs/${id}/revisions`),
+      rollbackGraph: (id, toVersion) => request(`/admin/graphs/${id}/rollback`, { method: 'POST', body: { toVersion } }),
+      trialGraph: (id, task) => request(`/admin/graphs/${id}/trial`, { method: 'POST', body: { task } }),
+      latestGraphRun: (id) => request(`/admin/graphs/${id}/latest-run`),
     },
   };
 }

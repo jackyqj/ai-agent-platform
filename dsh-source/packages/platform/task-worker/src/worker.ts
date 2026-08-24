@@ -8,6 +8,7 @@ import { lookupSecret } from '@deepseek-ai/dsh-credentials-pg'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveDshSessionId } from './resolve-session-id.js'
 
 loadPlatformEnv()
 
@@ -26,12 +27,17 @@ const cfg = {
   orphanGraceMs: Number(process.env.CP_ORPHAN_GRACE_MS ?? 10 * 60 * 1000),
   cancelPollMs: Number(process.env.CP_CANCEL_POLL_MS ?? 3000),
 }
+const runtimeModel = process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
+const runtimeViaGateway = runtimeModel.startsWith('cloud/')
 const runtime = {
   bin: process.env.CP_RUNTIME_BIN ?? fileURLToPath(new URL('../../../examples/jsonrpc-demo/lib/bin.js', import.meta.url)),
   cordis: process.env.CP_RUNTIME_CORDIS ?? fileURLToPath(new URL('../worker.cordis.yml', import.meta.url)),
-  model: process.env.DS_API_MODEL ?? process.env.DSH_MODEL ?? 'deepseek-v4-flash',
+  // cloud/* → LiteLLM；直连模型 → api.deepseek.com（可用 DEEPSEEK_BASE_URL 覆盖）。
+  model: runtimeModel,
   workspace: process.env.DSH_CWD ?? fileURLToPath(new URL('../workspace', import.meta.url)),
-  baseURL: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
+  baseURL:
+    process.env.DEEPSEEK_BASE_URL ??
+    (runtimeViaGateway ? 'http://127.0.0.1:4001/v1' : 'https://api.deepseek.com'),
 }
 
 /** Load control-plane .env (DS_API_KEY / CP_JWT_SECRET) without overriding a live shell. */
@@ -58,12 +64,43 @@ async function q<T>(text: string, args: unknown[] = []): Promise<{ rows: T[] }> 
   return pool.query(text, args)
 }
 
-async function getTask(taskId: string): Promise<{ id: string; userId: string; status: string; payload: { task?: string; permissionMode?: string } } | undefined> {
-  const { rows } = await q<{ id: string; userId: string; status: string; payload: { task?: string; permissionMode?: string } }>(
+function normalizeTaskPayload(raw: unknown): { task?: string; permissionMode?: string; sessionId?: string } {
+  if (raw == null) return {}
+  let value: unknown = raw
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return { task: value }
+    }
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) return {}
+  const obj = value as Record<string, unknown>
+  return {
+    task: typeof obj.task === 'string' ? obj.task : undefined,
+    permissionMode: typeof obj.permissionMode === 'string' ? obj.permissionMode : undefined,
+    sessionId: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
+  }
+}
+
+async function getTask(taskId: string): Promise<{
+  id: string
+  userId: string
+  status: string
+  payload: { task?: string; permissionMode?: string; sessionId?: string }
+} | undefined> {
+  const { rows } = await q<{
+    id: string
+    userId: string
+    status: string
+    payload: unknown
+  }>(
     `SELECT id, user_id AS "userId", status, payload FROM tasks WHERE id = $1`,
     [taskId],
   )
-  return rows[0]
+  const row = rows[0]
+  if (!row) return undefined
+  return { ...row, payload: normalizeTaskPayload(row.payload) }
 }
 
 /** rc.8 RunResult no longer carries finishReason; take it from the last turn/end. */
@@ -71,6 +108,19 @@ function finishReasonOf(result: RunResult): string | undefined {
   for (let i = result.events.length - 1; i >= 0; i--) {
     const event = result.events[i]
     if (event?.type === 'turn/end') return event.data.reason.kind
+  }
+  return undefined
+}
+
+/** Prefer provider error text when the turn ends without a usable assistant reply. */
+function turnErrorMessage(result: RunResult): string | undefined {
+  for (let i = result.events.length - 1; i >= 0; i--) {
+    const event = result.events[i]
+    if (event?.type !== 'turn/end') continue
+    const reason = event.data.reason as { kind?: string; error?: { message?: string }; message?: string }
+    if (reason.kind !== 'error') return undefined
+    const msg = reason.error?.message || reason.message
+    return msg?.trim() || '模型调用失败'
   }
   return undefined
 }
@@ -96,7 +146,14 @@ async function audit(userId: string, eventType: string, payload: unknown) {
 }
 
 /** 运行中取消：轮询任务状态，被 kill 则关闭 harness（杀掉运行时子进程）→ run 中止 */
-async function runWithCancel(job: Job, taskId: string, taskText: string, attempt: number, permissionMode: string): Promise<void> {
+async function runWithCancel(
+  job: Job,
+  taskId: string,
+  taskText: string,
+  attempt: number,
+  permissionMode: string,
+  storeSessionId?: string,
+): Promise<void> {
   let harness: DeepSeekHarness | undefined
   const stopPolling = { active: true }
   const poller = setInterval(async () => {
@@ -124,7 +181,9 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
           DSH_CWD: runtime.workspace,
           DSH_MODEL: runtime.model,
           EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
-          // Fallback only: credentials-pg prefers vault, so a rotation still wins.
+          // Gateway path: credentials-pg prefers vault; env is fallback for local boots.
+          GATEWAY_KEY: (await resolveRef('GATEWAY_KEY')) || process.env.GATEWAY_KEY || '',
+          // Direct-path fallback only.
           DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
           DSH_PERMISSION_MODE: permissionMode,
         },
@@ -133,9 +192,11 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
       model: runtime.model,
       maxTokens: 8192,
     })
-    console.log(`[worker] task ${taskId} spawning runtime`)
-    // 每尝试独立会话（幂等重试：上次的失败上下文不污染重跑）
-    const sessionId = `task-${taskId}-a${attempt}`
+    const sessionId = resolveDshSessionId({ storeSessionId, taskId, attempt })
+    console.log(
+      `[worker] task ${taskId} spawning runtime session=${sessionId}`
+      + ` (storeSessionId=${storeSessionId?.trim() || 'none'})`,
+    )
     const result = await Promise.race([
       harness.run(taskText, { sessionId }),
       new Promise<never>((_, reject) =>
@@ -150,8 +211,22 @@ async function runWithCancel(job: Job, taskId: string, taskText: string, attempt
       return
     }
     const finishReason = finishReasonOf(result)
-    await patchTask(taskId, { status: 'done', result: { finalResponse: result.finalResponse, finishReason }, finished: true })
-    await audit(t!.userId, 'task.completed', { taskId })
+    const turnError = turnErrorMessage(result)
+    const finalResponse = (result.finalResponse ?? '').trim()
+    if (finishReason === 'error' || (!finalResponse && turnError)) {
+      const error = turnError || '模型调用失败'
+      await patchTask(taskId, {
+        status: 'failed',
+        error,
+        result: { finalResponse: finalResponse || error, finishReason: finishReason ?? 'error' },
+        finished: true,
+      })
+      await audit(t!.userId, 'task.failed', { taskId, sessionId, error, finishReason })
+      console.log(`[worker] task ${taskId} failed (${finishReason ?? 'error'}): ${error}`)
+      return
+    }
+    await patchTask(taskId, { status: 'done', result: { finalResponse, finishReason }, finished: true })
+    await audit(t!.userId, 'task.completed', { taskId, sessionId })
     console.log(`[worker] task ${taskId} done (${finishReason ?? 'unknown'})`)
   } finally {
     stopPolling.active = false
@@ -182,7 +257,14 @@ async function execute(job: Job<{ taskId: string }>): Promise<void> {
   } else {
     await patchTask(taskId, { status: 'running' })
   }
-  await runWithCancel(job, taskId, task.payload?.task ?? '', attempt, task.payload?.permissionMode ?? 'workspace-write')
+  await runWithCancel(
+    job,
+    taskId,
+    task.payload?.task ?? '',
+    attempt,
+    task.payload?.permissionMode ?? 'workspace-write',
+    task.payload?.sessionId,
+  )
 }
 
 // ── 同用户串行：同一 userId 的任务链式执行，不同用户可并行 ────────────────

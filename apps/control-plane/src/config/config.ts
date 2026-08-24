@@ -55,7 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       robotCode: env.CP_DINGTALK_ROBOT_CODE ?? '',
     },
     roleMapByDept: csvMap(env.CP_ROLE_MAP_BY_DEPT),
-    frontendOrigin: env.CP_FRONTEND_ORIGIN ?? 'http://127.0.0.1:5173',
+    frontendOrigin: env.CP_FRONTEND_ORIGIN ?? 'http://127.0.0.1:5377',
     orchestrator: (env.CP_ORCHESTRATOR ?? 'memory') as AppConfig['orchestrator'],
     dshWebImage: env.CP_DSH_WEB_IMAGE ?? 'company-dsh-web:latest',
     maxConcurrentInstances: Number(env.CP_MAX_INSTANCES ?? 30),

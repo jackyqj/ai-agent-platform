@@ -12,6 +12,8 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     devLogin: vi.fn(async () => ({ accessToken: 't' })),
     me: vi.fn(async () => ({ id: 'u-admin', name: '管理员', role: 'admin', dept: 'IT' })),
     listAgents: vi.fn(async () => ({ agents: [] })),
+    listGraphs: vi.fn(async () => ({ graphs: [] })),
+    runGraph: vi.fn(async () => ({ run: { id: 'r1', graphId: 'g', status: 'done', steps: [] } })),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     createSession: vi.fn(async () => ({ sessionId: 's1', routingSecret: 'secret-should-stay-hidden' })),
     getSession: vi.fn(async () => ({ id: 's1', status: 'active', agentPresetId: 'assistant' })),
@@ -68,13 +70,29 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
       setApprovalChain: vi.fn(async () => ({ roles: [] })),
       kbDocuments: vi.fn(async () => ({ documents: [] })),
       kbStatus: vi.fn(async () => ({ documentCount: 0, chunkCount: 0, ingestRunning: false })),
-      uploadKbDocument: vi.fn(async () => ({ ok: true, document: { name: 't.md', format: 'md', sizeBytes: 1, updatedAt: '', visibility: { classification: 'internal', departments: ['*'], roles: [] }, indexed: false, chunkCount: 0 } })),
-      patchKbVisibility: vi.fn(async () => ({ ok: true, visibility: { classification: 'internal', departments: ['*'], roles: [] } })),
+      uploadKbDocument: vi.fn(async () => ({ ok: true, document: { name: 't.md', format: 'md', sizeBytes: 1, updatedAt: '', visibility: { classification: 'internal' as const, departments: ['*'], roles: [] }, indexed: false, chunkCount: 0 } })),
+      patchKbVisibility: vi.fn(async () => ({ ok: true, visibility: { classification: 'internal' as const, departments: ['*'], roles: [] } })),
       deleteKbDocument: vi.fn(async () => ({ ok: true })),
       triggerKbIngest: vi.fn(async () => ({ ok: true, startedAt: new Date().toISOString() })),
       kbSearch: vi.fn(async () => ({ hits: [], mode: 'none' })),
       kbAudit: vi.fn(async () => ({ events: [] })),
+      connectors: vi.fn(async () => ({ connectors: [] })),
+      putConnector: vi.fn(async () => ({ connector: { id: 'c', name: 'c', kind: 'http', status: 'draft', secretRef: 'X' } })),
+      publishConnector: vi.fn(async () => ({ notice: 'ok' })),
+      tools: vi.fn(async () => ({ tools: [] })),
+      putTool: vi.fn(async () => ({ tool: { id: 't', connectorId: 'c', name: 't', status: 'draft', description: '' } })),
+      publishTool: vi.fn(async () => ({ notice: 'ok' })),
+      graphs: vi.fn(async () => ({ graphs: [] })),
+      putGraph: vi.fn(async () => ({ graph: { id: 'g', name: 'g', description: '', status: 'draft', version: 0, spec: { onError: 'stop' as const, nodes: [], edges: [] } }, notice: 'ok' })),
+      publishGraph: vi.fn(async () => ({ graph: { id: 'g', name: 'g', description: '' }, notice: 'ok' })),
+      unpublishGraph: vi.fn(async () => ({ notice: 'ok' })),
+      getGraph: vi.fn(async () => ({ graph: { id: 'g', name: 'g', description: '', status: 'draft', version: 0, spec: { onError: 'stop' as const, nodes: [], edges: [] } } })),
+      graphRevisions: vi.fn(async () => ({ revisions: [] })),
+      rollbackGraph: vi.fn(async () => ({ graph: { id: 'g', name: 'g', description: '' }, notice: 'ok' })),
+      trialGraph: vi.fn(async () => ({ run: { id: 'r', graphId: 'g', status: 'done', steps: [] } })),
+      latestGraphRun: vi.fn(async () => ({ run: null })),
     },
+    getGraphRun: vi.fn(async () => ({ run: { id: 'r', graphId: 'g', status: 'done', steps: [] } })),
     ...overrides,
   };
 }
@@ -136,6 +154,18 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '登录' }));
     await waitFor(() => expect(screen.getByText('助手商店')).toBeInTheDocument());
     expect(client.devLogin).toHaveBeenCalledWith('u-admin');
+  });
+
+  it('shows published composite products for employees to run, not edit', async () => {
+    const client = fakeClient({
+      me: vi.fn(async () => ({ id: 'u-hr-1', name: 'HR', role: 'employee', dept: '人事' })),
+      listGraphs: vi.fn(async () => ({ graphs: [{ id: 'invoice-pack', name: '发票摘要', description: '拉数再写' }] })),
+    });
+    await loginAs(client);
+    expect(screen.getByRole('heading', { name: '组合产品' })).toBeInTheDocument();
+    expect(screen.getByText('发票摘要')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '运行' })).toBeInTheDocument();
+    expect(screen.queryByText('连接器 / 工具 / 组合图')).not.toBeInTheDocument();
   });
 
   it('restores a stored session and shows agents for a non-admin', async () => {

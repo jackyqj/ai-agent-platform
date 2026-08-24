@@ -904,6 +904,30 @@ describe('HarnessSdkJsonRpcServer', () => {
     await expect(server.getOrCreateSession('after-shutdown')).rejects.toThrow('SDK server is shutting down')
   })
 
+  it('resumes a persisted session id instead of creating an empty one', async () => {
+    const resumeHandle = { agent: {} as Agent, dispose: vi.fn(() => Promise.resolve()) }
+    const create = vi.fn()
+    const resume = vi.fn(async () => resumeHandle)
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      agents: { create, resume, get: () => undefined },
+      get: (name: string) => name === 'sessionPersistence'
+        ? { list: async () => [{ id: SessionId('store-sess') }] }
+        : undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport()) as unknown as {
+      getOrCreateSession(sessionId: string): Promise<{ handle: AgentHandle }>
+      shutdown(): Promise<Record<string, never>>
+    }
+
+    const rec = await server.getOrCreateSession('store-sess')
+    expect(rec.handle).toBe(resumeHandle)
+    expect(resume).toHaveBeenCalledOnce()
+    expect(resume.mock.calls[0]?.[0]).toMatchObject({ resumeSessionId: SessionId('store-sess') })
+    expect(create).not.toHaveBeenCalled()
+    await server.shutdown()
+  })
+
   it('resolves a relative cwd before creating the session', async () => {
     const create = vi.fn<(options: unknown) => Promise<AgentHandle>>()
       .mockResolvedValue({ agent: {} as Agent, dispose: () => Promise.resolve() })

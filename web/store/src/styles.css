@@ -1094,6 +1094,63 @@ pre.payload {
 
 .compose-grid .card { margin-bottom: 0; }
 
+.compose-grid.graph-workspace {
+  grid-template-columns: 180px minmax(0, 1fr) 300px;
+  align-items: stretch;
+}
+
+.compose-grid.graph-workspace .graph-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 148px);
+}
+
+.graph-meta-strip {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.graph-meta-strip input,
+.graph-meta-strip select {
+  flex: 1;
+  min-width: 0;
+}
+
+.graph-canvas {
+  flex: 1;
+  height: calc(100dvh - 220px);
+  min-height: 640px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.graph-rf-node {
+  min-width: 168px;
+  max-width: 220px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  font-size: 12px;
+}
+
+.graph-rf-node.kind-agent { border-left: 3px solid var(--ok, #2a7); }
+.graph-rf-node.kind-tool { border-left: 3px solid var(--accent, #46a); }
+.graph-rf-node.kind-gate { border-left: 3px solid var(--warn, #c80); }
+
+.graph-rf-id { font-family: var(--font-mono); font-weight: 600; }
+.graph-rf-kind { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+.graph-rf-caption {
+  margin-top: 4px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mini-head {
   margin: var(--space-3) 0 var(--space-1);
   font-size: var(--text-xs);

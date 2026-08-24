@@ -12,14 +12,17 @@
     url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
     masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
 
-# 模型：DeepSeek 官方端点（密钥由 credentials-pg resolve；模型名 DS_API_MODEL / DSH_MODEL）
+# 模型：经 LiteLLM（apiKeyEnv=GATEWAY_KEY + baseURL 指向网关）。
+# 缺 baseURL 时 dsh-llm-deepseek 会回落到 https://api.deepseek.com，
+# 再用 GATEWAY_KEY 去打官方 API → Authentication Fails …****788e。
 - id: llm-deepseek
   name: '@deepseek-ai/dsh-llm-deepseek'
   config:
-    apiKeyEnv: DEEPSEEK_API_KEY
+    apiKeyEnv: GATEWAY_KEY
+    baseURL: !!js process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:4001/v1'
     streamIdleTimeoutMs: 172800000
     models:
-      - id: !!js process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'deepseek-v4-flash'
+      - id: !!js process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
         contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
 
 # 沙箱：任务工作区（只读知识库检索场景，保守用 workspace 写限）

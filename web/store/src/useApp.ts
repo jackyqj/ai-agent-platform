@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
-import { buildSessionTitles, extractQuestionHint, formatSessionTitle, isQuotaError, tasksToMessages } from './chat-utils';
+import { buildSessionTitles, extractQuestionHint, formatSessionTitle, isQuotaError, tasksToMessages, waitForTaskResult } from './chat-utils';
 import { canKbManage, isFullAdmin, validateKbFile } from './kb-utils';
-import type { AdminPane, AgentSpec, AppState, ChatMessage, KbVisibility, Me, Route, TaskView } from './types';
+import type { AdminPane, AgentSpec, AppState, ChatMessage, GraphComposeState, GraphNode, GraphSpec, KbVisibility, Me, Route, TaskView } from './types';
 import { localToIso } from './util';
+import { dropEdgesTouching, linearEdges, newStepId, wouldCreateCycle } from './graph-compose-utils';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 export const API_HOST_DISPLAY = 'http://127.0.0.1:4000';
@@ -18,7 +19,17 @@ const initial: AppState = {
   toastErr: false,
 
   agents: [],
+  graphs: [],
+  graphBusy: {},
+  graphTask: {},
+  lastGraphRun: null,
   agentBusy: {},
+  allGraphs: [],
+  connectors: [],
+  catalogTools: [],
+  connForm: { id: '', name: '', kind: 'http', secretRef: '', baseUrl: 'https://', tables: '' },
+  toolForm: { id: '', connectorId: '', name: '', path: '/v1/' },
+  graphForm: { id: '', name: '' },
   mySessions: [],
   sessionTitles: {},
   myApprovals: [],
@@ -81,6 +92,7 @@ const initial: AppState = {
 
   errors: {},
   compose: null,
+  graphCompose: null,
 };
 
 export interface Actions {
@@ -141,6 +153,29 @@ export interface Actions {
   saveKbVisibility(name: string, visibility: KbVisibility): Promise<void>;
   triggerKbIngest(): Promise<void>;
   runKbSearch(): Promise<void>;
+  runGraph(id: string): Promise<void>;
+  saveConnector(): Promise<void>;
+  publishConnector(id: string): Promise<void>;
+  saveTool(): Promise<void>;
+  publishTool(id: string): Promise<void>;
+  saveGraphProduct(): Promise<void>;
+  publishGraphProduct(id: string): Promise<void>;
+  unpublishGraphProduct(id: string): Promise<void>;
+  openGraphCompose(graphId: string): Promise<void>;
+  closeGraphCompose(): void;
+  editGraphComposeMeta(patch: Partial<Pick<GraphComposeState, 'name' | 'description' | 'visibility' | 'showAdvancedJson' | 'editorMode' | 'selectedNodeId' | 'trialTask'>>): void;
+  editGraphComposeSpec(patch: Partial<GraphSpec> | GraphSpec): void;
+  addGraphStep(kind: GraphNode['kind']): void;
+  patchGraphStep(id: string, patch: Partial<GraphNode>): void;
+  removeGraphStep(id: string): void;
+  moveGraphStep(index: number, delta: number): void;
+  connectGraphEdge(from: string, to: string): void;
+  disconnectGraphEdge(from: string, to: string): void;
+  setGraphNodePosition(id: string, x: number, y: number): void;
+  saveGraphCompose(): Promise<void>;
+  publishGraphCompose(): Promise<void>;
+  trialGraphCompose(): Promise<void>;
+  rollbackGraphCompose(toVersion: number): Promise<void>;
 }
 
 export function useApp(clientOverride?: Client): { state: AppState; act: Actions } {
@@ -151,6 +186,93 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   const [state, setState] = useState<AppState>(initial);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ingestPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const run = state.graphCompose?.trialRun;
+    if (!run || (run.status !== 'awaiting_approval' && run.status !== 'running')) return;
+    let cancelled = false;
+    let inflight = false;
+    const tick = async () => {
+      if (inflight || cancelled) return;
+      inflight = true;
+      try {
+        const r = await client.getGraphRun(run.id);
+        if (cancelled) return;
+        setState((prev) => {
+          if (!prev.graphCompose || prev.graphCompose.trialRun?.id !== run.id) return prev;
+          return { ...prev, graphCompose: { ...prev.graphCompose, trialRun: r.run } };
+        });
+      } catch {
+        /* keep last log */
+      } finally {
+        inflight = false;
+      }
+    };
+    const id = window.setInterval(() => void tick(), 2000);
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [client, state.graphCompose?.trialRun?.id, state.graphCompose?.trialRun?.status]);
+
+  const hasPendingMyApprovals = state.myApprovals.some((a) => a.status === 'pending');
+
+  useEffect(() => {
+    if (!state.me || state.route !== 'admin' || !isFullAdmin(state.me)) return;
+    let cancelled = false;
+    let inflight = false;
+    const tick = async () => {
+      if (inflight || cancelled) return;
+      inflight = true;
+      try {
+        const [pending, stats] = await Promise.all([
+          client.admin.pendingApprovals(),
+          client.admin.statsUsage().catch(() => null),
+        ]);
+        if (cancelled) return;
+        setState((prev) => ({
+          ...prev,
+          approvals: pending.approvals || [],
+          ...(stats ? { stats } : {}),
+        }));
+      } catch {
+        /* keep last */
+      } finally {
+        inflight = false;
+      }
+    };
+    const id = window.setInterval(() => void tick(), 3000);
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [client, state.me, state.route]);
+
+  useEffect(() => {
+    if (!state.me) return;
+    let cancelled = false;
+    let inflight = false;
+    const tick = async () => {
+      if (inflight || cancelled) return;
+      inflight = true;
+      try {
+        const r = await client.myApprovals();
+        if (cancelled) return;
+        setState((prev) => ({ ...prev, myApprovals: r.approvals || [] }));
+      } catch {
+        /* keep last */
+      } finally {
+        inflight = false;
+      }
+    };
+    const id = window.setInterval(() => void tick(), hasPendingMyApprovals ? 3000 : 12000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [client, state.me, hasPendingMyApprovals]);
 
   function update(patch: Partial<AppState>) {
     setState((prev) => ({ ...prev, ...patch }));
@@ -164,19 +286,22 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, sessionsRes, schedRes, approvalRes, tasksRes] = await Promise.all([
+      const [agentsRes, graphsRes, sessionsRes, schedRes, approvalRes, tasksRes] = await Promise.all([
         client.listAgents(),
+        client.listGraphs().catch(() => ({ graphs: [] as AppState['graphs'] })),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
         client.listScheduled().catch(() => ({ tasks: [] as AppState['schedTasks'] })),
         client.myApprovals().catch(() => ({ approvals: [] as AppState['myApprovals'] })),
         client.listTasks().catch(() => ({ tasks: [] as TaskView[] })),
       ]);
       const agents = agentsRes.agents || [];
+      const graphs = graphsRes.graphs || [];
       const mySessions = (sessionsRes.sessions || []).filter((s) => s.status !== 'closed');
       const tasks = tasksRes.tasks || [];
       setState((prev) => ({
         ...prev,
         agents,
+        graphs,
         mySessions,
         sessionTitles: buildSessionTitles(mySessions, agents, tasks),
         schedTasks: schedRes.tasks || [],
@@ -223,6 +348,9 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       client.admin.kbDocuments().then((r) => setState((prev) => ({ ...prev, kbDocuments: r.documents || [] }))).catch(recordError('kb')),
       client.admin.kbStatus().then((r) => setState((prev) => ({ ...prev, kbStatus: r }))).catch(recordError('kb')),
       client.admin.kbAudit().then((r) => setState((prev) => ({ ...prev, kbAudit: r.events || [] }))).catch(recordError('kb')),
+      client.admin.connectors().then((r) => setState((prev) => ({ ...prev, connectors: r.connectors || [] }))).catch(recordError('catalog')),
+      client.admin.tools().then((r) => setState((prev) => ({ ...prev, catalogTools: r.tools || [] }))).catch(recordError('catalog')),
+      client.admin.graphs().then((r) => setState((prev) => ({ ...prev, allGraphs: r.graphs || [] }))).catch(recordError('catalog')),
       fetchAudit({
         limit: '50',
         ...(state.auditUser ? { userId: state.auditUser } : {}),
@@ -390,24 +518,35 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     }
     patchChat(agentId, { sending: true });
     try {
-      const r = await client.submitTask(agentId, text);
+      const r = await client.submitTask(agentId, text, sessionId ?? undefined);
       if (r.awaitingApproval) {
         appendChatMessages(agentId, [{ role: 'assistant', text: '已提交，等待审批通过后执行。' }]);
-        return;
       }
-      for (let i = 0; i < 40; i++) {
-        const g = await client.getTask(r.taskId);
-        if (g.task.status === 'done') {
-          appendChatMessages(agentId, [{ role: 'assistant', text: g.task.result?.finalResponse ?? '（无回复）' }]);
-          return;
+      const outcome = await waitForTaskResult((id) => client.getTask(id), r.taskId, {
+        maxAttempts: r.awaitingApproval ? 180 : 40,
+        intervalMs: 1500,
+      });
+      switch (outcome.kind) {
+        case 'done':
+          appendChatMessages(agentId, [{ role: 'assistant', text: outcome.text }]);
+          break;
+        case 'failed':
+          appendChatMessages(agentId, [{ role: 'assistant', text: outcome.text }]);
+          break;
+        case 'timeout':
+          appendChatMessages(agentId, [{
+            role: 'assistant',
+            text: r.awaitingApproval
+              ? '仍在等待审批或执行。刷新对话或稍后再看结果。'
+              : '仍在执行。刷新对话或稍后再看结果。',
+          }]);
+          break;
+        default: {
+          const _never: never = outcome;
+          return _never;
         }
-        if (g.task.status === 'failed') {
-          appendChatMessages(agentId, [{ role: 'assistant', text: g.task.error || '任务失败' }]);
-          return;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
-      appendChatMessages(agentId, [{ role: 'assistant', text: '仍在执行。刷新对话或稍后再看结果。' }]);
+      if (r.awaitingApproval) await loadMyApprovals().catch(() => undefined);
     } catch (e) {
       const message = (e as Error).message;
       // 限额等未真正发出的提问：从 transcript 撤回，改为 toast，避免留下「我 / 执行中」残影。
@@ -540,7 +679,12 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   async function decide(id: string, approve: boolean) {
     try {
       await client.admin.decideApproval(id, approve);
-      await Promise.all([loadAdminData(), loadStore()]);
+      const [pending] = await Promise.all([
+        client.admin.pendingApprovals(),
+        loadAdminData(),
+        loadStore(),
+      ]);
+      setState((prev) => ({ ...prev, approvals: pending.approvals || [] }));
       notify(approve ? '已批准' : '已拒绝');
     } catch (e) { notify('操作失败：' + (e as Error).message, true); }
   }
@@ -880,6 +1024,379 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     } catch (e) { notify('试搜失败：' + (e as Error).message, true); }
   }
 
+  async function runGraph(id: string) {
+    const task = state.graphTask[id] || '';
+    if (!task.trim()) { notify('请填写任务内容', true); return; }
+    setState((prev) => ({ ...prev, graphBusy: { ...prev.graphBusy, [id]: true } }));
+    try {
+      const r = await client.runGraph(id, task);
+      setState((prev) => ({ ...prev, lastGraphRun: r.run, graphBusy: { ...prev.graphBusy, [id]: false } }));
+      notify(r.run.status === 'done' ? '组合产品已跑完' : `状态：${r.run.status}`);
+    } catch (e) {
+      setState((prev) => ({ ...prev, graphBusy: { ...prev.graphBusy, [id]: false } }));
+      notify('运行失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function reloadCatalog() {
+    const [c, t, g] = await Promise.all([
+      client.admin.connectors(),
+      client.admin.tools(),
+      client.admin.graphs(),
+    ]);
+    setState((prev) => ({ ...prev, connectors: c.connectors || [], catalogTools: t.tools || [], allGraphs: g.graphs || [] }));
+  }
+
+  async function saveConnector() {
+    const f = state.connForm;
+    if (!f.id || !f.secretRef) { notify('需要 id 与 secretRef', true); return; }
+    try {
+      const body = f.kind === 'postgres'
+        ? { name: f.name, kind: 'postgres', secretRef: f.secretRef, postgres: { allowedTables: f.tables.split(',').map((s) => s.trim()).filter(Boolean), maxRows: 50 } }
+        : { name: f.name, kind: 'http', secretRef: f.secretRef, http: { baseUrl: f.baseUrl, allowedMethods: ['GET', 'POST'] } };
+      await client.admin.putConnector(f.id, body);
+      await reloadCatalog();
+      notify('已保存连接器');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function publishConnector(id: string) {
+    try {
+      await client.admin.publishConnector(id);
+      await reloadCatalog();
+      notify('已发布连接器');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function saveTool() {
+    const f = state.toolForm;
+    const conn = state.connectors.find((c) => c.id === f.connectorId);
+    if (!f.id || !conn) { notify('需要工具 id 与连接器', true); return; }
+    try {
+      const binding = conn.kind === 'postgres'
+        ? { kind: 'postgres', mode: 'query_readonly' }
+        : { kind: 'http', method: 'GET', pathTemplate: f.path };
+      await client.admin.putTool(f.id, { connectorId: f.connectorId, name: f.name, description: '', risk: 'read', binding });
+      await reloadCatalog();
+      notify('已保存工具');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function publishTool(id: string) {
+    try {
+      await client.admin.publishTool(id);
+      await reloadCatalog();
+      notify('已发布工具');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function saveGraphProduct() {
+    const f = state.graphForm;
+    if (!f.id || !f.name) { notify('需要图 id 与名称', true); return; }
+    try {
+      const seed: GraphSpec = { onError: 'stop', nodes: [], edges: [] };
+      await client.admin.putGraph(f.id, { name: f.name, description: '', spec: seed });
+      update({ graphForm: { id: '', name: '' } });
+      await reloadCatalog();
+      await openGraphCompose(f.id);
+      notify('已创建图草稿，进入编排');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function publishGraphProduct(id: string) {
+    try {
+      await client.admin.publishGraph(id);
+      await reloadCatalog();
+      await loadStore();
+      if (state.graphCompose?.graphId === id) await openGraphCompose(id);
+      notify('已上架组合产品');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function unpublishGraphProduct(id: string) {
+    try {
+      await client.admin.unpublishGraph(id);
+      await reloadCatalog();
+      await loadStore();
+      if (state.graphCompose?.graphId === id) await openGraphCompose(id);
+      notify('已下架');
+    } catch (e) { notify((e as Error).message, true); }
+  }
+
+  async function openGraphCompose(graphId: string) {
+    try {
+      const [gRes, toolsRes, agentsRes, revRes, runRes] = await Promise.all([
+        client.admin.getGraph(graphId),
+        client.admin.tools(),
+        client.admin.allAgents(),
+        client.admin.graphRevisions(graphId).catch(() => ({ revisions: [] })),
+        client.admin.latestGraphRun(graphId).catch(() => ({ run: null })),
+      ]);
+      const g = gRes.graph;
+      const spec = g.spec ?? { onError: 'stop' as const, nodes: [], edges: [] };
+      setState((prev) => ({
+        ...prev,
+        graphCompose: {
+          graphId: g.id,
+          name: g.name,
+          description: g.description ?? '',
+          visibility: g.visibility ?? {},
+          spec,
+          version: g.version ?? 0,
+          status: g.status ?? 'draft',
+          dirty: false,
+          showAdvancedJson: false,
+          editorMode: prev.graphCompose?.graphId === graphId ? prev.graphCompose.editorMode : 'canvas',
+          selectedNodeId: null,
+          agents: agentsRes.agents || [],
+          tools: toolsRes.tools || [],
+          revisions: revRes.revisions || [],
+          trialTask: prev.graphCompose?.graphId === graphId ? prev.graphCompose.trialTask : '',
+          trialRun: runRes.run ?? (prev.graphCompose?.graphId === graphId ? prev.graphCompose.trialRun : null),
+          trialBusy: false,
+          saving: false,
+          publishing: false,
+        },
+      }));
+    } catch (e) {
+      notify('打开图编排失败：' + (e as Error).message, true);
+    }
+  }
+
+  function closeGraphCompose() {
+    setState((prev) => ({ ...prev, graphCompose: null }));
+  }
+
+  function editGraphComposeMeta(patch: Partial<Pick<GraphComposeState, 'name' | 'description' | 'visibility' | 'showAdvancedJson' | 'editorMode' | 'selectedNodeId' | 'trialTask'>>) {
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      const cosmetic = Object.keys(patch).every((k) =>
+        k === 'trialTask' || k === 'editorMode' || k === 'selectedNodeId' || k === 'showAdvancedJson',
+      );
+      return { ...prev, graphCompose: { ...prev.graphCompose, ...patch, dirty: cosmetic ? prev.graphCompose.dirty : true } };
+    });
+  }
+
+  function editGraphComposeSpec(patch: Partial<GraphSpec> | GraphSpec) {
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      const full = patch as GraphSpec;
+      const isFull = Array.isArray(full.nodes) && Array.isArray(full.edges) && (full.onError === 'stop' || full.onError === 'continue')
+        && Object.keys(full).every((k) => k === 'nodes' || k === 'edges' || k === 'onError');
+      const spec = isFull ? full : { ...prev.graphCompose.spec, ...patch };
+      return { ...prev, graphCompose: { ...prev.graphCompose, spec, dirty: true } };
+    });
+  }
+
+  function setGraphNodes(nodes: GraphNode[], opts?: { linearize?: boolean }) {
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      const ids = new Set(nodes.map((n) => n.id));
+      const edges = opts?.linearize
+        ? linearEdges(nodes)
+        : prev.graphCompose.spec.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+      return {
+        ...prev,
+        graphCompose: {
+          ...prev.graphCompose,
+          dirty: true,
+          selectedNodeId: prev.graphCompose.selectedNodeId && ids.has(prev.graphCompose.selectedNodeId)
+            ? prev.graphCompose.selectedNodeId
+            : null,
+          spec: { ...prev.graphCompose.spec, nodes, edges },
+        },
+      };
+    });
+  }
+
+  function addGraphStep(kind: GraphNode['kind']) {
+    const c = state.graphCompose;
+    if (!c) return;
+    const id = newStepId(c.spec.nodes);
+    const node: GraphNode = kind === 'agent'
+      ? { id, kind, agentPresetId: c.agents.find((a) => a.status === 'published')?.id, promptTemplate: '{{input.task}}' }
+      : kind === 'tool'
+        ? { id, kind, toolId: c.tools.find((t) => t.status === 'published')?.id, argsTemplate: {} }
+        : { id, kind, when: 'true' };
+    setGraphNodes([...c.spec.nodes, node]);
+  }
+
+  function patchGraphStep(id: string, patch: Partial<GraphNode>) {
+    const c = state.graphCompose;
+    if (!c) return;
+    setGraphNodes(c.spec.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+  }
+
+  function removeGraphStep(id: string) {
+    const c = state.graphCompose;
+    if (!c) return;
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      const nodes = prev.graphCompose.spec.nodes.filter((n) => n.id !== id);
+      return {
+        ...prev,
+        graphCompose: {
+          ...prev.graphCompose,
+          dirty: true,
+          selectedNodeId: prev.graphCompose.selectedNodeId === id ? null : prev.graphCompose.selectedNodeId,
+          spec: {
+            ...prev.graphCompose.spec,
+            nodes,
+            edges: dropEdgesTouching(prev.graphCompose.spec.edges, id),
+          },
+        },
+      };
+    });
+  }
+
+  function moveGraphStep(index: number, delta: number) {
+    const c = state.graphCompose;
+    if (!c) return;
+    const to = index + delta;
+    if (to < 0 || to >= c.spec.nodes.length) return;
+    const nodes = [...c.spec.nodes];
+    const [row] = nodes.splice(index, 1);
+    nodes.splice(to, 0, row);
+    setGraphNodes(nodes, { linearize: true });
+  }
+
+  function connectGraphEdge(from: string, to: string) {
+    const c = state.graphCompose;
+    if (!c) return;
+    if (c.spec.edges.some((e) => e.from === from && e.to === to)) return;
+    if (wouldCreateCycle(c.spec, from, to)) {
+      notify('不能形成环：图必须是 DAG', true);
+      return;
+    }
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      return {
+        ...prev,
+        graphCompose: {
+          ...prev.graphCompose,
+          dirty: true,
+          spec: { ...prev.graphCompose.spec, edges: [...prev.graphCompose.spec.edges, { from, to }] },
+        },
+      };
+    });
+  }
+
+  function disconnectGraphEdge(from: string, to: string) {
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      return {
+        ...prev,
+        graphCompose: {
+          ...prev.graphCompose,
+          dirty: true,
+          spec: {
+            ...prev.graphCompose.spec,
+            edges: prev.graphCompose.spec.edges.filter((e) => !(e.from === from && e.to === to)),
+          },
+        },
+      };
+    });
+  }
+
+  function setGraphNodePosition(id: string, x: number, y: number) {
+    setState((prev) => {
+      if (!prev.graphCompose) return prev;
+      return {
+        ...prev,
+        graphCompose: {
+          ...prev.graphCompose,
+          dirty: true,
+          spec: {
+            ...prev.graphCompose.spec,
+            nodes: prev.graphCompose.spec.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
+          },
+        },
+      };
+    });
+  }
+
+  async function saveGraphCompose() {
+    const c = state.graphCompose;
+    if (!c) return;
+    setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, saving: true } } : prev);
+    try {
+      await client.admin.putGraph(c.graphId, {
+        name: c.name,
+        description: c.description,
+        visibility: c.visibility,
+        spec: c.spec,
+      });
+      await openGraphCompose(c.graphId);
+      await reloadCatalog();
+      notify('已保存图草稿');
+    } catch (e) {
+      notify('保存失败：' + (e as Error).message, true);
+      setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, saving: false } } : prev);
+    }
+  }
+
+  async function publishGraphCompose() {
+    const c = state.graphCompose;
+    if (!c) return;
+    setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, publishing: true } } : prev);
+    try {
+      if (c.dirty) {
+        await client.admin.putGraph(c.graphId, {
+          name: c.name,
+          description: c.description,
+          visibility: c.visibility,
+          spec: c.spec,
+        });
+      }
+      await client.admin.publishGraph(c.graphId);
+      await openGraphCompose(c.graphId);
+      await reloadCatalog();
+      await loadStore();
+      notify('已上架组合产品');
+    } catch (e) {
+      notify('发布失败：' + (e as Error).message, true);
+      setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, publishing: false } } : prev);
+    }
+  }
+
+  async function trialGraphCompose() {
+    const c = state.graphCompose;
+    if (!c) return;
+    setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, trialBusy: true } } : prev);
+    try {
+      if (c.dirty) {
+        await client.admin.putGraph(c.graphId, {
+          name: c.name,
+          description: c.description,
+          visibility: c.visibility,
+          spec: c.spec,
+        });
+      }
+      const r = await client.admin.trialGraph(c.graphId, c.trialTask || '');
+      setState((prev) => prev.graphCompose
+        ? { ...prev, graphCompose: { ...prev.graphCompose, trialRun: r.run, trialBusy: false, dirty: false } }
+        : prev);
+      notify(r.run.status === 'done' ? '试跑完成' : `试跑状态：${r.run.status}`);
+    } catch (e) {
+      setState((prev) => prev.graphCompose ? { ...prev, graphCompose: { ...prev.graphCompose, trialBusy: false } } : prev);
+      notify('试跑失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function rollbackGraphCompose(toVersion: number) {
+    const c = state.graphCompose;
+    if (!c) return;
+    try {
+      const r = await client.admin.rollbackGraph(c.graphId, toVersion);
+      await openGraphCompose(c.graphId);
+      await reloadCatalog();
+      await loadStore();
+      notify(r.notice);
+    } catch (e) {
+      notify('回滚失败：' + (e as Error).message, true);
+    }
+  }
+
   // Restore a stored session on first mount. SSO callback lands on #token=.
   useEffect(() => {
     const raw = location.hash.replace(/^#/, '');
@@ -921,6 +1438,10 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     saveOverlay, clearOverlay, loadAudit,
     uploadKb, confirmKbUpload, deleteKb, saveKbVisibility, triggerKbIngest, runKbSearch,
     openCompose, closeCompose, editComposeSpec, refreshComposePreview, saveComposeSpec, publishCompose, rollbackCompose,
+    runGraph, saveConnector, publishConnector, saveTool, publishTool, saveGraphProduct, publishGraphProduct, unpublishGraphProduct,
+    openGraphCompose, closeGraphCompose, editGraphComposeMeta, editGraphComposeSpec, addGraphStep, patchGraphStep, removeGraphStep, moveGraphStep,
+    connectGraphEdge, disconnectGraphEdge, setGraphNodePosition,
+    saveGraphCompose, publishGraphCompose, trialGraphCompose, rollbackGraphCompose,
   };
 
   return { state, act };

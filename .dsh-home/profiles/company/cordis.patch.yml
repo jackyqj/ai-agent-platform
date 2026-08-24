@@ -13,15 +13,29 @@
       涉及公司数据时严格遵守数据分级：机密数据只能在私有模型路由下处理，绝不外传。
       敏感操作（写数据库、对外发送）一律先走审批；超出能力或权限时明确说明，不编造。
 
-# ── 默认模型路由 ────────────────────────────────────────────────────────────
-# Phase 0（网关未上线）：使用官方 deepseek 适配器，密钥走 apiKeyEnv 引用。
-# 网关上线后（03 工单）切换为 pi-ai 路由：
-#   provider: gateway            # LiteLLM 在 pi-ai 配置中注册的路由名
-#   model: private/qwen-72b      # 敏感场景默认私有；通用场景在会话内可选云端
+# ── 默认模型路由：走 LiteLLM 网关（03 工单）──────────────────────────────
+# 网关在 configs/gateway/，podman-compose 起，宿主端口 LITELLM_PORT（默认 4001）。
+# 交互实例经 pi-ai（OpenAI 兼容）provider 路由 'gateway'；模型名=网关路由别名。
+# 证书：apiKeyEnv 引用（D20 密钥服务解析为 GATEWAY_KEY，即网关 master key）。
+# 私有/机密数据路由到 private/qwen-72b（D18）；通用场景 cloud/deepseek。
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      gateway:
+        displayName: LiteLLM 网关
+        api: openai-completions
+        baseURL: http://127.0.0.1:4001/v1
+        apiKeyEnv: GATEWAY_KEY
+        models:
+          - id: private/qwen-72b
+          - id: cloud/deepseek
+
+# 默认模型：通用场景走网关云端路由；敏感场景 preset 会钉死 private/qwen-72b
 - id: agent-default-model
   config:
-    provider: deepseek-official
-    model: deepseek-v4-flash
+    provider: gateway
+    model: cloud/deepseek
 
 # ── 公司 Agent preset 根（Phase 2 Agent 商店雏形）───────────────────────────
 - insert:
@@ -35,6 +49,8 @@
         includeUserRoot: false                 # 员工自建 preset 走提审，不直接开放
 
 # ── 集中凭据（09 / D20：PG vault；交互容器走 HTTP resolve，不持主密钥）────
+# 按请求 resolve；vault 优先于 env，admin 轮换无需重启实例。
+# CP_SECRETS_URL 非空 → HTTP（容器）；否则直连 PG（worker / 本机 CLI）。
 - id: credentials
   name: '@deepseek-ai/dsh-credentials-pg'
   config:
@@ -43,16 +59,31 @@
     resolveUrl: !!js process.env.CP_SECRETS_URL ?? ''
     token: !!js process.env.CP_SECRETS_TOKEN ?? ''
 
+# ── 共享会话存储（08 工单：PG 持久化替代 JSONL）────────────────────────────
+# 会话事件落 PostgreSQL（dsh_sessions schema），跨实例/跨设备可恢复。
+- id: session-persistence-jsonl
+  disabled: true
+- insert:
+    - id: session-persistence-pg
+      name: '@deepseek-ai/dsh-session-persistence-pg'
+      config:
+        url: !!js 'process.env.SESSION_PG_URL'   # 生产从密钥服务注入（D20）
+
 # ── 内部 MCP Server（04 工单的接入位，一个 Server 一行）────────────────────
-# - id: mcp-kb
-#   name: '@deepseek-ai/dsh-mcp-client'
-#   config:
-#     serverName: kb
-#     transport: streamable-http
-#     url: http://127.0.0.1:8787/mcp
-#     headers:
-#       Authorization: !!js '`Bearer ${process.env.MCP_KB_TOKEN}`'
+# Phase 0：stdio 模式（DSH 拉起子进程，内部单机首选）
+- id: mcp-kb
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: kb
+    transport: stdio
+    command: node
+    args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
+    env:
+      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
+      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
+      EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
 #
+# Phase 1+ 服务化升级：streamable-http（SDK HTTP 路径修复后启用，见 04 README 已知问题）
 # - id: mcp-db
 #   name: '@deepseek-ai/dsh-mcp-client'
 #   config:

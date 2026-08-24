@@ -53,6 +53,107 @@ export interface Agent {
   status?: string;
 }
 
+export interface GraphProduct {
+  id: string;
+  name: string;
+  description: string;
+  version?: number;
+  status?: string;
+  spec?: GraphSpec;
+  visibility?: { departments?: string[]; roles?: string[] };
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface GraphNode {
+  id: string;
+  kind: 'agent' | 'tool' | 'gate';
+  agentPresetId?: string;
+  promptTemplate?: string;
+  toolId?: string;
+  argsTemplate?: Record<string, string>;
+  when?: string;
+  /** 画布坐标；缺省由 DAG 布局推算 */
+  x?: number;
+  y?: number;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+}
+
+export interface GraphSpec {
+  onError: 'stop' | 'continue';
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface GraphRevision {
+  graphId: string;
+  version: number;
+  name: string;
+  description: string;
+  spec: GraphSpec;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+export interface GraphComposeState {
+  graphId: string;
+  name: string;
+  description: string;
+  visibility: { departments?: string[]; roles?: string[] };
+  spec: GraphSpec;
+  version: number;
+  status: string;
+  dirty: boolean;
+  showAdvancedJson: boolean;
+  editorMode: 'list' | 'canvas';
+  selectedNodeId: string | null;
+  agents: Agent[];
+  tools: CatalogToolView[];
+  revisions: GraphRevision[];
+  trialTask: string;
+  trialRun: GraphRunView | null;
+  trialBusy: boolean;
+  saving: boolean;
+  publishing: boolean;
+}
+
+export interface GraphStepView {
+  nodeId: string;
+  kind: string;
+  status: string;
+  output?: string;
+  error?: string;
+}
+
+export interface GraphRunView {
+  id: string;
+  graphId: string;
+  status: string;
+  result?: string;
+  error?: string;
+  steps: GraphStepView[];
+}
+
+export interface ConnectorView {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+  secretRef: string;
+}
+
+export interface CatalogToolView {
+  id: string;
+  connectorId: string;
+  name: string;
+  status: string;
+  description: string;
+}
+
 export interface Approval {
   id: string;
   requesterUserId: string;
@@ -182,7 +283,7 @@ export interface TaskView {
   agentPresetId?: string;
   status: string;
   payload?: { task: string } | string;
-  result?: { finalResponse: string };
+  result?: { finalResponse: string; finishReason?: string };
   error?: string;
   createdAt?: string;
   finishedAt?: string;
@@ -204,7 +305,17 @@ export interface AppState {
   toastErr: boolean;
 
   agents: Agent[];
+  graphs: GraphProduct[];
+  graphBusy: Record<string, boolean>;
+  graphTask: Record<string, string>;
+  lastGraphRun: GraphRunView | null;
   agentBusy: Record<string, boolean>;
+  allGraphs: GraphProduct[];
+  connectors: ConnectorView[];
+  catalogTools: CatalogToolView[];
+  connForm: { id: string; name: string; kind: string; secretRef: string; baseUrl: string; tables: string };
+  toolForm: { id: string; connectorId: string; name: string; path: string };
+  graphForm: { id: string; name: string };
   mySessions: SessionRow[];
   sessionTitles: Record<string, string>;
   schedTasks: ScheduledTask[];
@@ -268,6 +379,7 @@ export interface AppState {
   errors: Record<string, string>;
 
   compose: ComposeState | null;
+  graphCompose: GraphComposeState | null;
 }
 
 // ── Agent 编排（agent-orchestration-design.md）──────────────────

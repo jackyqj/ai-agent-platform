@@ -17,9 +17,11 @@ model_list:
       max_tokens: 8192
 
   # ── 云端路由（通用场景）─────────────────────────────────────────────────
+  # 上游模型对齐公司当前使用的 deepseek-v4-flash（见 control-plane .env 的 DS_API_MODEL）。
+  # 注意：LiteLLM 不支持 `${VAR:-default}` 默认值语法，模型名直接写死（或整串用 env 覆盖）。
   - model_name: cloud/deepseek
     litellm_params:
-      model: deepseek/deepseek-chat
+      model: deepseek/deepseek-v4-flash
       api_key: os.environ/DEEPSEEK_API_KEY
       rpm: 120
 

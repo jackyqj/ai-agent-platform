@@ -1,6 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { buildSessionTitles, extractQuestionHint, formatSessionTitle, resolveSessionTitle, tasksToMessages } from './chat-utils';
+import { buildSessionTitles, extractQuestionHint, formatSessionTitle, resolveSessionTitle, tasksToMessages, waitForTaskResult } from './chat-utils';
 import type { TaskView } from './types';
+
+describe('waitForTaskResult', () => {
+  it('keeps polling through queued (awaiting approval) until done', async () => {
+    const statuses = ['queued', 'queued', 'running', 'done'] as const;
+    let i = 0;
+    const sleeps: number[] = [];
+    const result = await waitForTaskResult(
+      async () => {
+        const status = statuses[Math.min(i, statuses.length - 1)]!;
+        i += 1;
+        return {
+          task: {
+            id: 't1',
+            status,
+            result: status === 'done' ? { finalResponse: '批准后回复' } : undefined,
+          },
+        };
+      },
+      't1',
+      { intervalMs: 10, sleep: async (ms) => { sleeps.push(ms); } },
+    );
+    expect(result).toEqual({ kind: 'done', text: '批准后回复' });
+    expect(i).toBe(4);
+    expect(sleeps.length).toBe(3);
+  });
+
+  it('returns failed when the task fails after approval', async () => {
+    const result = await waitForTaskResult(
+      async () => ({ task: { id: 't1', status: 'failed', error: '拒绝执行' } }),
+      't1',
+      { sleep: async () => undefined },
+    );
+    expect(result).toEqual({ kind: 'failed', text: '拒绝执行' });
+  });
+});
 
 describe('tasksToMessages', () => {
   it('reconstructs user/assistant pairs from done tasks for one agent', () => {
@@ -71,19 +106,37 @@ describe('tasksToMessages', () => {
     ]);
   });
 
-  it('keeps truly running tasks as pending', () => {
+  it('shows a placeholder when done tasks have empty finalResponse', () => {
     const messages = tasksToMessages([
       {
-        id: 't1',
+        id: 't-empty',
         agentPresetId: 'assistant',
-        status: 'running',
-        payload: { task: '进行中' },
+        status: 'done',
+        payload: { task: '全员，落地速度，经营分析' },
+        result: { finalResponse: '', finishReason: 'error' },
         createdAt: '2026-08-21T00:00:00Z',
       },
     ], 'assistant');
     expect(messages).toEqual([
-      { role: 'user', text: '进行中' },
-      { role: 'assistant', text: '（执行中…）', pending: true },
+      { role: 'user', text: '全员，落地速度，经营分析' },
+      { role: 'assistant', text: '（无回复）' },
+    ]);
+  });
+
+  it('shows failed task errors in the transcript', () => {
+    const messages = tasksToMessages([
+      {
+        id: 't-fail',
+        agentPresetId: 'assistant',
+        status: 'failed',
+        payload: { task: '下一轮' },
+        error: 'Authentication Fails',
+        createdAt: '2026-08-21T00:00:00Z',
+      },
+    ], 'assistant');
+    expect(messages).toEqual([
+      { role: 'user', text: '下一轮' },
+      { role: 'assistant', text: 'Authentication Fails' },
     ]);
   });
 

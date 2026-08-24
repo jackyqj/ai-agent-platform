@@ -80,12 +80,16 @@ describe('store-client', () => {
     expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant' }));
   });
 
-  it('submitTask posts the question to /tasks', async () => {
+  it('submitTask posts the question and optional sessionId to /tasks', async () => {
     const calls = stubFetch(async () => okJson({ taskId: 't1', status: 'queued' }));
     const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
-    await c.submitTask('assistant', '请假制度是什么');
+    await c.submitTask('assistant', '请假制度是什么', 'sess-1');
     expect(calls[0].url).toBe('http://x/api/tasks');
-    expect(calls[0].body).toBe(JSON.stringify({ agentPresetId: 'assistant', task: '请假制度是什么' }));
+    expect(calls[0].body).toBe(JSON.stringify({
+      agentPresetId: 'assistant',
+      task: '请假制度是什么',
+      sessionId: 'sess-1',
+    }));
   });
 
   it('closeSession posts to /sessions/:id/close', async () => {
@@ -102,5 +106,18 @@ describe('store-client', () => {
     const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
     await c.listTasks();
     expect(seen).toBe('http://x/api/tasks');
+  });
+
+  it('listGraphs and runGraph hit the catalog routes', async () => {
+    const calls = stubFetch(async (url) => {
+      if (url.includes('/run')) return okJson({ run: { id: 'r', graphId: 'g', status: 'done', steps: [] } });
+      return okJson({ graphs: [] });
+    });
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.listGraphs();
+    await c.runGraph('invoice-pack', '查 INV-1');
+    expect(calls[0].url).toBe('http://x/api/graphs');
+    expect(calls[1].url).toBe('http://x/api/graphs/invoice-pack/run');
+    expect(calls[1].body).toBe(JSON.stringify({ task: '查 INV-1' }));
   });
 });

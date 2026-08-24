@@ -9,12 +9,13 @@ import { ApprovalService } from '../approvals/approval.service.js'
 import { QuotaService } from '../quota/quota.service.js'
 import { UsersService } from '../users/users.service.js'
 import { PermissionPolicyService } from '../common/permission-policy.service.js'
+import { SessionsService } from '../sessions/sessions.service.js'
 
 export interface TaskRecord {
   id: string
   userId: string
   agentPresetId: string
-  payload: { task: string; permissionMode?: string }
+  payload: { task: string; permissionMode?: string; sessionId?: string }
   status: 'queued' | 'running' | 'done' | 'failed'
   result?: { finalResponse: string; finishReason?: string | null }
   error?: string
@@ -36,6 +37,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     private readonly quota: QuotaService,
     private readonly users: UsersService,
     private readonly policies: PermissionPolicyService,
+    private readonly sessions: SessionsService,
   ) {}
 
   private redisUrl(): string {
@@ -56,14 +58,25 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 提交任务：PG 落库（queued）→ 审批门（preset approvalLevel）→ 通过则入队，否则等待审批 */
-  async submit(userId: string, agentPresetId: string, taskText: string): Promise<TaskRecord & { awaitingApproval?: boolean }> {
+  async submit(
+    userId: string,
+    agentPresetId: string,
+    taskText: string,
+    opts?: { sessionId?: string },
+  ): Promise<TaskRecord & { awaitingApproval?: boolean }> {
     const user = this.users.get(userId)
     const permissionMode = this.policies.resolve(user?.role ?? 'employee', user?.dept ?? '')
+    const sessionId = opts?.sessionId?.trim() || undefined
+    if (sessionId) {
+      const s = await this.sessions.get(sessionId)
+      if (!s || s.userId !== userId) throw new Error('session not found')
+      if (s.status === 'closed') throw new Error('session closed')
+    }
     const record: TaskRecord = {
       id: randomUUID(),
       userId,
       agentPresetId,
-      payload: { task: taskText, permissionMode },
+      payload: { task: taskText, permissionMode, ...(sessionId ? { sessionId } : {}) },
       status: 'queued',
       createdAt: new Date().toISOString(),
     }
@@ -85,7 +98,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     if (gate.granted) {
       await this.enqueue(record.id)
     }
-    await this.audit.append({ userId, eventType: 'task.submitted', payload: { taskId: record.id, agentPresetId, gated: !gate.granted } })
+    await this.audit.append({
+      userId,
+      sessionId,
+      eventType: 'task.submitted',
+      payload: { taskId: record.id, agentPresetId, gated: !gate.granted, sessionId },
+    })
     return { ...record, awaitingApproval: !gate.granted }
   }
 

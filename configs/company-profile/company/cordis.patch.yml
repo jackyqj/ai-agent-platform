@@ -13,15 +13,29 @@
       涉及公司数据时严格遵守数据分级：机密数据只能在私有模型路由下处理，绝不外传。
       敏感操作（写数据库、对外发送）一律先走审批；超出能力或权限时明确说明，不编造。
 
-# ── 默认模型路由 ────────────────────────────────────────────────────────────
-# Phase 0（网关未上线）：使用官方 deepseek 适配器，密钥走 apiKeyEnv 引用。
-# 网关上线后（03 工单）切换为 pi-ai 路由：
-#   provider: gateway            # LiteLLM 在 pi-ai 配置中注册的路由名
-#   model: private/qwen-72b      # 敏感场景默认私有；通用场景在会话内可选云端
+# ── 默认模型路由：走 LiteLLM 网关（03 工单）──────────────────────────────
+# 网关在 configs/gateway/，podman-compose 起，宿主端口 LITELLM_PORT（默认 4001）。
+# 交互实例经 pi-ai（OpenAI 兼容）provider 路由 'gateway'；模型名=网关路由别名。
+# 证书：apiKeyEnv 引用（D20 密钥服务解析为 GATEWAY_KEY，即网关 master key）。
+# 私有/机密数据路由到 private/qwen-72b（D18）；通用场景 cloud/deepseek。
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      gateway:
+        displayName: LiteLLM 网关
+        api: openai-completions
+        baseURL: http://127.0.0.1:4001/v1
+        apiKeyEnv: GATEWAY_KEY
+        models:
+          - id: private/qwen-72b
+          - id: cloud/deepseek
+
+# 默认模型：通用场景走网关云端路由；敏感场景 preset 会钉死 private/qwen-72b
 - id: agent-default-model
   config:
-    provider: deepseek-official
-    model: deepseek-v4-flash
+    provider: gateway
+    model: cloud/deepseek
 
 # ── 公司 Agent preset 根（Phase 2 Agent 商店雏形）───────────────────────────
 - insert:

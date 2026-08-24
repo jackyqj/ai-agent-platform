@@ -16,6 +16,9 @@ export type Permission =
   | 'user.manage'        // 用户管理
   | 'secrets.manage'     // D20 密钥读写（永不返回明文列表）
   | 'kb.manage'            // 知识库文档与索引管理
+  | 'connector.manage'     // 连接器 / 工具目录
+  | 'graph.edit'           // 组合图草稿
+  | 'graph.publish'        // 组合图上架
 
 export const ROLE_ORDER = ['employee', 'developer', 'admin'] as const
 export type Role = (typeof ROLE_ORDER)[number]
@@ -26,6 +29,7 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'task.cancel': ['employee', 'developer', 'admin'], // 自己的任务（归属校验仍生效）
   // 开发者
   'agent.edit': ['developer', 'admin'], // 编排 spec 编辑
+  'graph.edit': ['developer', 'admin'],
   'audit.view': ['admin'], // v1 收紧到 admin；开发者审计权限按需放开
   // 管理员
   'agent.publish': ['admin'],
@@ -38,6 +42,8 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'user.manage': ['admin'],
   'secrets.manage': ['admin'],
   'kb.manage': ['admin'],
+  'connector.manage': ['admin'],
+  'graph.publish': ['admin'],
 }
 
 export function can(role: Role, permission: Permission): boolean {

@@ -8,6 +8,7 @@
       2) 然后调用 query_readonly 执行 SELECT，一次查不清就细化查询；3) 工具返回什么就汇报什么，
       禁止编造工具输出或伪造结果；4) 汇报用表格，标注统计口径（时间范围/分组维度）与行数；
       5) 查询失败或数据为空时如实说明，不得假装成功。
+      6) 结果数据能用柱状图或饼图的时候渲染出来。
 - id: agent-default-model
   name: "@deepseek-ai/dsh-agent-default-model"
   config:

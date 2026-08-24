@@ -220,15 +220,35 @@ export class HarnessSdkJsonRpcServer {
     // rows in the host plane, so this agent reads them from the global layer. A
     // deployment that configures a roster has to join one here first
     // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
-    const handle = await this.ctx.agents.create({
-      sessionId: SessionId(sessionId),
-      meta: { cwd: this.cwd },
-      agentOptions: {
-        provider: this.provider,
-        model: this.model,
-        ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
-      },
-    })
+    const agentOptions = {
+      provider: this.provider,
+      model: this.model,
+      ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
+    }
+    // Each SDK client run may spawn a fresh runtime process. Reusing a wire
+    // sessionId must resume the persisted transcript; create() alone always
+    // starts an empty live session and the model loses prior turns.
+    const persistence = this.ctx.get('sessionPersistence')
+    let handle: AgentHandle
+    if (persistence !== undefined) {
+      const exists = (await persistence.list()).some(header => String(header.id) === sessionId)
+      handle = exists
+        ? await this.ctx.agents.resume({
+            resumeSessionId: SessionId(sessionId),
+            agentOptions,
+          })
+        : await this.ctx.agents.create({
+            sessionId: SessionId(sessionId),
+            meta: { cwd: this.cwd },
+            agentOptions,
+          })
+    } else {
+      handle = await this.ctx.agents.create({
+        sessionId: SessionId(sessionId),
+        meta: { cwd: this.cwd },
+        agentOptions,
+      })
+    }
     const rec: SessionRecord = { handle }
     this.sessions.set(sessionId, rec)
     return rec

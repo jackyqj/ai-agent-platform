@@ -110,10 +110,11 @@ export function tasksToMessages(tasks: TaskView[], agentPresetId: string, since?
     const question = taskQuestionText(t);
     if (!question) continue;
     messages.push({ role: 'user', text: question });
-    if (t.status === 'done' && t.result?.finalResponse) {
-      messages.push({ role: 'assistant', text: t.result.finalResponse });
-    } else if (t.status === 'failed' && t.error) {
-      messages.push({ role: 'assistant', text: t.error });
+    if (t.status === 'done') {
+      const text = (t.result?.finalResponse ?? '').trim() || '（无回复）';
+      messages.push({ role: 'assistant', text });
+    } else if (t.status === 'failed') {
+      messages.push({ role: 'assistant', text: (t.error || t.result?.finalResponse || '任务失败').trim() });
     } else if (t.status === 'running') {
       messages.push({ role: 'assistant', text: '（执行中…）', pending: true });
     }
@@ -123,4 +124,35 @@ export function tasksToMessages(tasks: TaskView[], agentPresetId: string, since?
 
 export function isQuotaError(message: string): boolean {
   return /配额/.test(message);
+}
+
+export type TaskWaitResult =
+  | { kind: 'done'; text: string }
+  | { kind: 'failed'; text: string }
+  | { kind: 'timeout' };
+
+/** Poll a submitted task until done/failed, or until attempts are exhausted. */
+export async function waitForTaskResult(
+  getTask: (id: string) => Promise<{ task: TaskView }>,
+  taskId: string,
+  opts?: { maxAttempts?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void> },
+): Promise<TaskWaitResult> {
+  const maxAttempts = opts?.maxAttempts ?? 120;
+  const intervalMs = opts?.intervalMs ?? 1500;
+  const sleep = opts?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  for (let i = 0; i < maxAttempts; i++) {
+    const g = await getTask(taskId);
+    if (g.task.status === 'done') {
+      const text = (g.task.result?.finalResponse ?? '').trim() || '（无回复）';
+      return { kind: 'done', text };
+    }
+    if (g.task.status === 'failed') {
+      return { kind: 'failed', text: (g.task.error || g.task.result?.finalResponse || '任务失败').trim() };
+    }
+    if (g.task.status === 'killed') {
+      return { kind: 'failed', text: g.task.error || '任务已取消' };
+    }
+    await sleep(intervalMs);
+  }
+  return { kind: 'timeout' };
 }

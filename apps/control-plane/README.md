@@ -41,7 +41,15 @@ CP_ORCHESTRATOR=docker CP_DSH_WEB_IMAGE=company-dsh-web:latest CP_CONTAINER_CMD=
 node dist/main.js
 ```
 
-环境变量见 `.env.example`。PG 迁移：`psql -U adaptix -d control_plane -f migrations/001_init.sql`。
+环境变量见 `.env.example`。PG 迁移：`psql -U adaptix -d control_plane -f migrations/001_init.sql`。Skill 市场（24 工单）在 016–020：
+
+```sh
+psql -U adaptix -d control_plane -f migrations/016_skills.sql
+psql -U adaptix -d control_plane -f migrations/017_skill_feedback.sql
+psql -U adaptix -d control_plane -f migrations/018_change_requests.sql
+psql -U adaptix -d control_plane -f migrations/019_notifications.sql
+psql -U adaptix -d control_plane -f migrations/020_skill_draft.sql
+```
 
 ## 冒烟流程（已验证）
 

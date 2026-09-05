@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ChangeRequestView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, InboxNote, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SkillItem, SkillVersionView, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -63,6 +63,22 @@ export interface Client {
   publishSpec(id: string, expectedVersion: number): Promise<{ agent: Agent; version: number; notice: string }>;
   listRevisions(id: string): Promise<{ revisions: Revision[] }>;
   rollback(id: string, toVersion: number): Promise<{ agent: Agent; version: number; notice: string }>;
+
+  listSkills(): Promise<{ skills: SkillItem[] }>;
+  createSkill(body: { slug: string; title: string; description?: string; body?: string; version?: string; visibility?: string; departmentId?: string; tags?: string[] }): Promise<{ skill: SkillItem; notice: string }>;
+  getSkill(id: string): Promise<{ skill: SkillItem }>;
+  patchSkill(id: string, body: Record<string, unknown>): Promise<{ skill: SkillItem; notice: string }>;
+  submitSkill(id: string): Promise<{ skill: SkillItem; notice: string }>;
+  archiveSkill(id: string): Promise<{ skill: SkillItem; notice: string }>;
+  listSkillVersions(id: string): Promise<{ versions: SkillVersionView[] }>;
+  addSkillVersion(id: string, body: { version: string; body?: string }): Promise<{ skill: SkillItem; notice: string }>;
+  reviewSkill(id: string, vid: string, body: { decision: 'approve' | 'reject'; comment?: string }): Promise<{ skill: SkillItem; notice: string }>;
+  skillFeedback(id: string, kind: 'like' | 'dislike'): Promise<{ skill: SkillItem }>;
+  listChangeRequests(id: string): Promise<{ changeRequests: ChangeRequestView[] }>;
+  addChangeRequest(id: string, body: { lineNo: number; originalText: string; suggestedText: string; reason?: string }): Promise<{ changeRequest: ChangeRequestView; notice: string }>;
+  handleChangeRequest(id: string, body: { status: string; reply?: string }): Promise<{ changeRequest: ChangeRequestView }>;
+  listNotifications(): Promise<{ notifications: InboxNote[]; unread: number }>;
+  readNotifications(ids?: string[]): Promise<{ notifications: InboxNote[]; unread: number }>;
 
   admin: {
     pendingApprovals(): Promise<{ approvals: Approval[] }>;
@@ -208,6 +224,22 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     publishSpec: (id, expectedVersion) => request<{ agent: Agent; version: number; notice: string }>(`/admin/agents/${id}/publish`, { method: 'POST', body: { expectedVersion } }),
     listRevisions: (id) => request<{ revisions: Revision[] }>(`/admin/agents/${id}/revisions`),
     rollback: (id, toVersion) => request<{ agent: Agent; version: number; notice: string }>(`/admin/agents/${id}/rollback`, { method: 'POST', body: { toVersion } }),
+
+    listSkills: () => request<{ skills: SkillItem[] }>('/skills'),
+    createSkill: (body) => request<{ skill: SkillItem; notice: string }>('/skills', { method: 'POST', body }),
+    getSkill: (id) => request<{ skill: SkillItem }>(`/skills/${id}`),
+    patchSkill: (id, body) => request<{ skill: SkillItem; notice: string }>(`/skills/${id}`, { method: 'PATCH', body }),
+    submitSkill: (id) => request<{ skill: SkillItem; notice: string }>(`/skills/${id}/submit`, { method: 'POST', body: {} }),
+    archiveSkill: (id) => request<{ skill: SkillItem; notice: string }>(`/skills/${id}/archive`, { method: 'POST', body: {} }),
+    listSkillVersions: (id) => request<{ versions: SkillVersionView[] }>(`/skills/${id}/versions`),
+    addSkillVersion: (id, body) => request<{ skill: SkillItem; notice: string }>(`/skills/${id}/versions`, { method: 'POST', body }),
+    reviewSkill: (id, vid, body) => request<{ skill: SkillItem; notice: string }>(`/skills/${id}/versions/${vid}/review`, { method: 'POST', body }),
+    skillFeedback: (id, kind) => request<{ skill: SkillItem }>(`/skills/${id}/feedback`, { method: 'POST', body: { kind } }),
+    listChangeRequests: (id) => request<{ changeRequests: ChangeRequestView[] }>(`/skills/${id}/change-requests`),
+    addChangeRequest: (id, body) => request<{ changeRequest: ChangeRequestView; notice: string }>(`/skills/${id}/change-requests`, { method: 'POST', body }),
+    handleChangeRequest: (id, body) => request<{ changeRequest: ChangeRequestView }>(`/change-requests/${id}`, { method: 'PATCH', body }),
+    listNotifications: () => request<{ notifications: InboxNote[]; unread: number }>('/notifications'),
+    readNotifications: (ids) => request<{ notifications: InboxNote[]; unread: number }>('/notifications/read', { method: 'POST', body: { ids } }),
 
     admin: {
       pendingApprovals: () => request<{ approvals: Approval[] }>('/admin/approvals/pending'),

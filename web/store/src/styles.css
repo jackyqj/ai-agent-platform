@@ -1563,3 +1563,23 @@ pre.payload {
     animation: none;
   }
 }
+
+.skill-meta { display: flex; gap: var(--space-3); flex-wrap: wrap; color: var(--text-dim); font-size: var(--text-sm); }
+.skill-editor { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.skill-editor label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-sm); color: var(--text-dim); }
+.skill-editor label.wide { grid-column: 1 / -1; }
+.skill-editor input, .skill-editor select, .skill-editor textarea { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: var(--space-2); border-radius: var(--radius-sm); }
+.skill-editor .preview { grid-column: 1 / -1; padding: var(--space-4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.skill-read { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.sentence { background: none; border: none; color: inherit; text-align: left; padding: 2px 4px; border-radius: 4px; cursor: pointer; font: inherit; }
+.sentence:hover { background: var(--accent-dim); }
+.skill-body { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--text-sm); }
+.inbox { position: relative; }
+.inbox summary { cursor: pointer; list-style: none; }
+.inbox-count { margin-left: 4px; background: var(--danger); color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; }
+.inbox-panel { position: absolute; right: 0; top: 120%; min-width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); z-index: 20; }
+.toolbar { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-4) 0; }
+.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.linkish { background: none; border: none; color: var(--accent-strong); cursor: pointer; font: inherit; padding: 0; }
+.muted { color: var(--text-dim); }
+

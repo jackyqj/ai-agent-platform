@@ -39,6 +39,21 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     publishSpec: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, version: 2, notice: 'ok' })),
     listRevisions: vi.fn(async () => ({ revisions: [] })),
     rollback: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, version: 3, notice: 'ok' })),
+    listSkills: vi.fn(async () => ({ skills: [] })),
+    createSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    getSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 } })),
+    patchSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    submitSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'pending', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    archiveSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'archived', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    listSkillVersions: vi.fn(async () => ({ versions: [] })),
+    addSkillVersion: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'pending', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    reviewSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'published', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    skillFeedback: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'published', likeCount: 1, dislikeCount: 0, score: 0.2, stars: 1 } })),
+    listChangeRequests: vi.fn(async () => ({ changeRequests: [] })),
+    addChangeRequest: vi.fn(async () => ({ changeRequest: { id: 'cr', skillId: 'sk1', versionId: 'v', anchor: { line_no: 1, original_text: 'a' }, suggestedText: 'b', reason: '', requesterId: 'u', status: 'open' }, notice: 'ok' })),
+    handleChangeRequest: vi.fn(async () => ({ changeRequest: { id: 'cr', skillId: 'sk1', versionId: 'v', anchor: { line_no: 1, original_text: 'a' }, suggestedText: 'b', reason: '', requesterId: 'u', status: 'adopted' } })),
+    listNotifications: vi.fn(async () => ({ notifications: [], unread: 0 })),
+    readNotifications: vi.fn(async () => ({ notifications: [], unread: 0 })),
     admin: {
       pendingApprovals: vi.fn(async () => ({ approvals: [] })),
       decideApproval: vi.fn(async () => undefined),
@@ -345,5 +360,17 @@ describe('App', () => {
     await user.click(within(table).getByText('HR'));
     await waitFor(() => expect(screen.getByText(/session.create/)).toBeInTheDocument());
     expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+  });
+
+  it('opens the skill market from the nav', async () => {
+    const client = fakeClient({
+      listSkills: vi.fn(async () => ({
+        skills: [{ id: 'sk1', slug: 'leave-faq', title: '请假 FAQ', description: '请假', status: 'published', likeCount: 2, dislikeCount: 0, score: 0.4, stars: 2 }],
+      })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('link', { name: '技能' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: '技能' })).toBeInTheDocument());
+    expect(screen.getByText('请假 FAQ')).toBeInTheDocument();
   });
 });

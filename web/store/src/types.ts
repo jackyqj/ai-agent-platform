@@ -254,7 +254,62 @@ export interface ModelsBody {
 
 // ── app state (what the views render) ────────────────────
 
-export type Route = 'store' | 'admin' | 'chat';
+export type Route = 'store' | 'admin' | 'chat' | 'skills';
+
+export interface SkillItem {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  ownerId?: string;
+  visibility?: string;
+  departmentId?: string;
+  tags?: string[];
+  status: string;
+  currentVersionId?: string;
+  likeCount: number;
+  dislikeCount: number;
+  score: number;
+  stars: number;
+  myFeedback?: 'like' | 'dislike';
+  draftBody?: string;
+  draftFrontmatter?: Record<string, unknown>;
+  draftVersion?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SkillVersionView {
+  id: string;
+  skillId: string;
+  version: string;
+  frontmatter: Record<string, unknown>;
+  body: string;
+  status: string;
+  reviewerId?: string;
+  reviewComment?: string;
+}
+
+export interface ChangeRequestView {
+  id: string;
+  skillId: string;
+  versionId: string;
+  anchor: { line_no: number; original_text: string };
+  suggestedText: string;
+  reason: string;
+  requesterId: string;
+  status: string;
+  reply?: string;
+  resolvedVersion?: string;
+}
+
+export interface InboxNote {
+  id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  readAt?: string;
+  createdAt: string;
+}
 export type AdminPane = 'workbench' | 'config' | 'kb' | 'investigate';
 
 export interface ChatMessage {
@@ -327,6 +382,16 @@ export interface AppState {
   chat: ChatState | null;
   adminPane: AdminPane;
   showPropose: boolean;
+
+  skills: SkillItem[];
+  skillDetail: SkillItem | null;
+  skillVersions: SkillVersionView[];
+  skillRequests: ChangeRequestView[];
+  skillForm: { slug: string; title: string; description: string; body: string; version: string; visibility: string; tags: string };
+  skillCreating: boolean;
+  inbox: InboxNote[];
+  inboxUnread: number;
+  crDraft: { lineNo: number; originalText: string; suggested: string; reason: string } | null;
 
   pId: string;
   pName: string;

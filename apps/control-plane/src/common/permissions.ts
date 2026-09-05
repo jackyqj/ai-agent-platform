@@ -19,6 +19,9 @@ export type Permission =
   | 'connector.manage'     // 连接器 / 工具目录
   | 'graph.edit'           // 组合图草稿
   | 'graph.publish'        // 组合图上架
+  | 'skill.create'         // skill 草稿创建（登录即可）
+  | 'skill.review'         // skill 版本审核
+  | 'skill.manage'         // skill 管理：下架 / 代处理 / 改可见性
 
 export const ROLE_ORDER = ['employee', 'developer', 'admin'] as const
 export type Role = (typeof ROLE_ORDER)[number]
@@ -27,9 +30,11 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   // 员工基础
   'agent.propose': ['employee', 'developer', 'admin'],
   'task.cancel': ['employee', 'developer', 'admin'], // 自己的任务（归属校验仍生效）
+  'skill.create': ['employee', 'developer', 'admin'], // skill 草稿创建
   // 开发者
   'agent.edit': ['developer', 'admin'], // 编排 spec 编辑
   'graph.edit': ['developer', 'admin'],
+  'skill.review': ['developer', 'admin'],
   'audit.view': ['admin'], // v1 收紧到 admin；开发者审计权限按需放开
   // 管理员
   'agent.publish': ['admin'],
@@ -44,6 +49,7 @@ export const PERMISSIONS: Record<Permission, Role[]> = {
   'kb.manage': ['admin'],
   'connector.manage': ['admin'],
   'graph.publish': ['admin'],
+  'skill.manage': ['admin'],
 }
 
 export function can(role: Role, permission: Permission): boolean {

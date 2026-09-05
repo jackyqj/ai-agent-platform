@@ -4,6 +4,7 @@ import { applyTheme, readTheme, writeTheme, type Theme } from './theme';
 import { canKbManage, isFullAdmin } from './kb-utils';
 import LoginIllustration from './LoginIllustration';
 import StoreView from './StoreView';
+import SkillStoreView from './SkillStoreView';
 import AdminView from './AdminView';
 import ChatView from './ChatView';
 import type { Client } from './store-client';
@@ -50,6 +51,8 @@ export default function App({ client }: { client?: Client }) {
           <ChatView state={state} act={act} />
         ) : route === 'admin' && kbMgr ? (
           <AdminView state={state} act={act} kbOnly={kbOnly} />
+        ) : route === 'skills' ? (
+          <SkillStoreView state={state} act={act} />
         ) : (
           <StoreView state={state} act={act} />
         )}
@@ -89,14 +92,20 @@ function Topbar({
   state: AppState;
   act: Actions;
 }) {
-  const go = (key: 'store' | 'admin', label: string, hash = '#' + key) => (
+  const go = (key: 'store' | 'admin' | 'skills', label: string, hash = '#' + key) => (
     <a
       className={route === key ? 'active' : ''}
       href={hash}
       onClick={(e) => {
         e.preventDefault();
         const adminPane: AdminPane = key === 'admin' ? (kbOnly ? 'kb' : 'workbench') : state.adminPane;
-        act.update({ route: key, adminPane, chat: key === 'store' ? null : state.chat });
+        act.update({
+          route: key,
+          adminPane,
+          chat: key === 'store' || key === 'skills' ? null : state.chat,
+          skillCreating: false,
+          skillDetail: key === 'skills' ? state.skillDetail : null,
+        });
         history.replaceState(null, '', hash);
       }}
     >
@@ -111,21 +120,46 @@ function Topbar({
         <span>AI Agent 平台</span>
         <span className="tag">试点</span>
       </div>
-      {kbMgr ? (
+      {state.me ? (
         <nav className="nav">
           {go('store', '商店')}
-          {fullAdmin ? go('admin', '管理') : go('admin', '知识库', '#admin/kb')}
+          {go('skills', '技能')}
+          {kbMgr ? (fullAdmin ? go('admin', '管理') : go('admin', '知识库', '#admin/kb')) : null}
         </nav>
       ) : null}
       <ThemeToggle />
       {state.me ? (
         <div className="who">
+          <InboxBell state={state} act={act} />
           <span>{state.me.name}</span>
           <span className="role">{state.me.role}</span>
           <a href="#" onClick={(e) => { e.preventDefault(); act.logout(); }}>退出</a>
         </div>
       ) : null}
     </header>
+  );
+}
+
+function InboxBell({ state, act }: { state: AppState; act: Actions }) {
+  const unread = state.inboxUnread;
+  return (
+    <details className="inbox">
+      <summary title="站内通知">
+        通知{unread ? <span className="inbox-count">{unread}</span> : null}
+      </summary>
+      <div className="inbox-panel">
+        {state.inbox.length === 0 ? <p className="muted">没有通知</p> : (
+          <ul className="plain">
+            {state.inbox.slice(0, 12).map((n) => (
+              <li key={n.id} className={n.readAt ? 'muted' : ''}>
+                {n.kind}
+              </li>
+            ))}
+          </ul>
+        )}
+        {unread ? <button className="ghost" onClick={() => void act.markInboxRead()}>全部已读</button> : null}
+      </div>
+    </details>
   );
 }
 

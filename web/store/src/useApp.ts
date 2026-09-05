@@ -42,6 +42,16 @@ const initial: AppState = {
   adminPane: 'workbench',
   showPropose: false,
 
+  skills: [],
+  skillDetail: null,
+  skillVersions: [],
+  skillRequests: [],
+  skillForm: { slug: '', title: '', description: '', body: '', version: '0.1.0', visibility: 'company', tags: '' },
+  skillCreating: false,
+  inbox: [],
+  inboxUnread: 0,
+  crDraft: null,
+
   pId: '',
   pName: '',
   pDesc: '',
@@ -161,6 +171,19 @@ export interface Actions {
   saveGraphProduct(): Promise<void>;
   publishGraphProduct(id: string): Promise<void>;
   unpublishGraphProduct(id: string): Promise<void>;
+  openSkill(id: string): Promise<void>;
+  closeSkill(): void;
+  createSkill(): Promise<void>;
+  saveSkill(): Promise<void>;
+  submitSkill(): Promise<void>;
+  archiveSkill(): Promise<void>;
+  voteSkill(kind: 'like' | 'dislike'): Promise<void>;
+  reviewSkill(vid: string, decision: 'approve' | 'reject', comment?: string): Promise<void>;
+  addSkillVersion(): Promise<void>;
+  startChangeRequest(lineNo: number, originalText: string): void;
+  submitChangeRequest(): Promise<void>;
+  handleChangeRequest(id: string, status: string, reply?: string): Promise<void>;
+  markInboxRead(): Promise<void>;
   openGraphCompose(graphId: string): Promise<void>;
   closeGraphCompose(): void;
   editGraphComposeMeta(patch: Partial<Pick<GraphComposeState, 'name' | 'description' | 'visibility' | 'showAdvancedJson' | 'editorMode' | 'selectedNodeId' | 'trialTask'>>): void;
@@ -286,13 +309,15 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, graphsRes, sessionsRes, schedRes, approvalRes, tasksRes] = await Promise.all([
+      const [agentsRes, graphsRes, sessionsRes, schedRes, approvalRes, tasksRes, skillsRes, notesRes] = await Promise.all([
         client.listAgents(),
         client.listGraphs().catch(() => ({ graphs: [] as AppState['graphs'] })),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
         client.listScheduled().catch(() => ({ tasks: [] as AppState['schedTasks'] })),
         client.myApprovals().catch(() => ({ approvals: [] as AppState['myApprovals'] })),
         client.listTasks().catch(() => ({ tasks: [] as TaskView[] })),
+        client.listSkills().catch(() => ({ skills: [] as AppState['skills'] })),
+        client.listNotifications().catch(() => ({ notifications: [] as AppState['inbox'], unread: 0 })),
       ]);
       const agents = agentsRes.agents || [];
       const graphs = graphsRes.graphs || [];
@@ -306,6 +331,9 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         sessionTitles: buildSessionTitles(mySessions, agents, tasks),
         schedTasks: schedRes.tasks || [],
         myApprovals: approvalRes.approvals || [],
+        skills: skillsRes.skills || [],
+        inbox: notesRes.notifications || [],
+        inboxUnread: notesRes.unread || 0,
       }));
     } catch (e) {
       notify('加载商店失败：' + (e as Error).message, true);
@@ -1431,6 +1459,195 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   useEffect(() => () => stopIngestPoll(), []);
 
+  async function openSkill(id: string) {
+    try {
+      const [detail, vers, crs] = await Promise.all([
+        client.getSkill(id),
+        client.listSkillVersions(id).catch(() => ({ versions: [] })),
+        client.listChangeRequests(id).catch(() => ({ changeRequests: [] })),
+      ]);
+      const s = detail.skill;
+      setState((prev) => ({
+        ...prev,
+        skillDetail: s,
+        skillVersions: vers.versions || [],
+        skillRequests: crs.changeRequests || [],
+        skillCreating: false,
+        skillForm: {
+          slug: s.slug,
+          title: s.title,
+          description: s.description,
+          body: s.draftBody ?? '',
+          version: s.draftVersion ?? '0.1.0',
+          visibility: s.visibility ?? 'company',
+          tags: (s.tags ?? []).join(', '),
+        },
+        crDraft: null,
+        route: 'skills',
+      }));
+      history.replaceState(null, '', '#skills/' + id);
+    } catch (e) {
+      notify('加载 skill 失败：' + (e as Error).message, true);
+    }
+  }
+
+  function closeSkill() {
+    setState((prev) => ({ ...prev, skillDetail: null, skillCreating: false, crDraft: null }));
+    history.replaceState(null, '', '#skills');
+  }
+
+  async function createSkill() {
+    const f = state.skillForm;
+    if (!f.slug.trim() || !f.title.trim()) {
+      notify('需要 slug 与标题', true);
+      return;
+    }
+    try {
+      const r = await client.createSkill({
+        slug: f.slug.trim(),
+        title: f.title.trim(),
+        description: f.description,
+        body: f.body,
+        version: f.version || '0.1.0',
+        visibility: f.visibility,
+        tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      });
+      notify(r.notice);
+      await loadStore();
+      await openSkill(r.skill.id);
+    } catch (e) {
+      notify('创建失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function saveSkill() {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    const f = state.skillForm;
+    try {
+      const r = await client.patchSkill(id, {
+        title: f.title,
+        description: f.description,
+        body: f.body,
+        version: f.version,
+        visibility: f.visibility,
+        tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      });
+      notify(r.notice);
+      await openSkill(id);
+      await loadStore();
+    } catch (e) {
+      notify('保存失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function submitSkill() {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    try {
+      const r = await client.submitSkill(id);
+      notify(r.notice);
+      await openSkill(id);
+      await loadStore();
+    } catch (e) {
+      notify('提交失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function archiveSkill() {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    try {
+      const r = await client.archiveSkill(id);
+      notify(r.notice);
+      await loadStore();
+      closeSkill();
+    } catch (e) {
+      notify('下架失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function voteSkill(kind: 'like' | 'dislike') {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    try {
+      await client.skillFeedback(id, kind);
+      await openSkill(id);
+      await loadStore();
+    } catch (e) {
+      notify('投票失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function reviewSkill(vid: string, decision: 'approve' | 'reject', comment?: string) {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    try {
+      const r = await client.reviewSkill(id, vid, { decision, comment });
+      notify(r.notice);
+      await openSkill(id);
+      await loadStore();
+    } catch (e) {
+      notify('审核失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function addSkillVersion() {
+    const id = state.skillDetail?.id;
+    if (!id) return;
+    const f = state.skillForm;
+    try {
+      const r = await client.addSkillVersion(id, { version: f.version, body: f.body });
+      notify(r.notice);
+      await openSkill(id);
+      await loadStore();
+    } catch (e) {
+      notify('新版本失败：' + (e as Error).message, true);
+    }
+  }
+
+  function startChangeRequest(lineNo: number, originalText: string) {
+    setState((prev) => ({ ...prev, crDraft: { lineNo, originalText, suggested: originalText, reason: '' } }));
+  }
+
+  async function submitChangeRequest() {
+    const id = state.skillDetail?.id;
+    const d = state.crDraft;
+    if (!id || !d) return;
+    try {
+      const r = await client.addChangeRequest(id, {
+        lineNo: d.lineNo,
+        originalText: d.originalText,
+        suggestedText: d.suggested,
+        reason: d.reason,
+      });
+      notify(r.notice);
+      setState((prev) => ({ ...prev, crDraft: null }));
+      await openSkill(id);
+    } catch (e) {
+      notify('建议失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function handleChangeRequest(id: string, status: string, reply?: string) {
+    try {
+      await client.handleChangeRequest(id, { status, reply });
+      notify('已处理工单');
+      if (state.skillDetail) await openSkill(state.skillDetail.id);
+    } catch (e) {
+      notify('处理失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function markInboxRead() {
+    try {
+      const r = await client.readNotifications();
+      setState((prev) => ({ ...prev, inbox: r.notifications, inboxUnread: r.unread }));
+    } catch (e) {
+      notify('标记已读失败：' + (e as Error).message, true);
+    }
+  }
+
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, propose,
     decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
@@ -1442,6 +1659,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     openGraphCompose, closeGraphCompose, editGraphComposeMeta, editGraphComposeSpec, addGraphStep, patchGraphStep, removeGraphStep, moveGraphStep,
     connectGraphEdge, disconnectGraphEdge, setGraphNodePosition,
     saveGraphCompose, publishGraphCompose, trialGraphCompose, rollbackGraphCompose,
+    openSkill, closeSkill, createSkill, saveSkill, submitSkill, archiveSkill, voteSkill, reviewSkill, addSkillVersion,
+    startChangeRequest, submitChangeRequest, handleChangeRequest, markInboxRead,
   };
 
   return { state, act };
@@ -1452,6 +1671,7 @@ export function parseLocation(hash: string, me: Me | null): { route: Route; admi
   const kbOk = canKbManage(me);
   const fullAdmin = isFullAdmin(me);
   if (h === 'chat' || h.startsWith('chat/')) return { route: 'chat', adminPane: 'workbench' };
+  if (h === 'skills' || h.startsWith('skills/')) return { route: 'skills', adminPane: 'workbench' };
   if (h.startsWith('admin')) {
     if (!kbOk) return { route: 'store', adminPane: 'workbench' };
     if (!fullAdmin) return { route: 'admin', adminPane: 'kb' };

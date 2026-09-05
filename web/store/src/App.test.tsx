@@ -379,6 +379,16 @@ describe('App', () => {
     expect(screen.getByText('请假 FAQ')).toBeInTheDocument();
   });
 
+  it('badges an agent whose bound skill has a newer published version', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({
+        agents: [{ ...assistant, skillUpdates: [{ skillId: 'sk1', boundVersion: '0.1.0', currentVersion: '0.2.0' }] }],
+      })),
+    });
+    await loginAs(client);
+    expect(screen.getByText('可更新')).toBeInTheDocument();
+  });
+
   it('opens a skill from the hash on login', async () => {
     window.history.replaceState(null, '', '/#skills/sk1');
     const skill = { id: 'sk1', slug: 'leave-faq', title: '请假 FAQ', description: '请假', status: 'published' as const, likeCount: 2, dislikeCount: 0, score: 0.4, stars: 2 };

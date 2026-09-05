@@ -1,0 +1,4 @@
+# 小彼恩 marketplace bundle — 侧边栏/CLI 入口；不改 dsh 标题（3a 不卡商标）。
+- insert:
+    - id: bienen-market
+      name: '@bienen/dsh-plugin-marketplace'

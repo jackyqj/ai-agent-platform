@@ -51,6 +51,8 @@ psql -U adaptix -d control_plane -f migrations/019_notifications.sql
 psql -U adaptix -d control_plane -f migrations/020_skill_draft.sql
 ```
 
+Skill 绑定进 Agent 后，发布会把 `skills/<slug>/SKILL.md` 快照进 preset 根。同事本机同步见 `packages/dsh-plugin-marketplace/README.md`；品牌安装包见 `packages/dsh-brand/README.md`（`./scripts/build-bienen-dsh.sh`）。
+
 ## 冒烟流程（已验证）
 
 ```sh

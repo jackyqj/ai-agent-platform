@@ -268,6 +268,21 @@ export class SkillsService {
     return { frontmatter: fm, body: ver.body, version: ver.version, markdown: `---\n${yaml}\n---\n${ver.body}` }
   }
 
+  /** Compile-time snapshot: published skill + exact semver, no caller visibility filter. */
+  async snapshotPublished(skillId: string, version: string): Promise<{ slug: string; markdown: string; version: string }> {
+    const skill = await this.repo.getSkill(skillId)
+    if (!skill) throw new SkillsError('skill 不存在', 404)
+    const pack = await this.publishedMarkdown(skillId, { id: skill.ownerId, role: 'admin', dept: skill.departmentId ?? '' }, version)
+    return { slug: skill.slug, markdown: pack.markdown, version: pack.version }
+  }
+
+  async currentPublishedSemver(skillId: string): Promise<string | undefined> {
+    const skill = await this.repo.getSkill(skillId)
+    if (!skill?.currentVersionId) return undefined
+    const ver = await this.repo.getVersion(skill.currentVersionId)
+    return ver?.status === 'published' ? ver.version : undefined
+  }
+
   async setFeedback(id: string, kind: FeedbackKind, actor: SkillActor): Promise<SkillRecord> {
     const skill = await this.get(id, actor)
     if (skill.status !== 'published') throw new SkillsError('只能给已发布 skill 投票', 409)
@@ -361,7 +376,17 @@ export class SkillsService {
     return cr
   }
 
-  publicView(skill: SkillRecord, extra?: { mine?: FeedbackKind; includeDraft?: boolean }): Record<string, unknown> {
+  async publishedVersionInfo(skillId: string): Promise<{ current?: string; versions: string[] }> {
+    const skill = await this.repo.getSkill(skillId)
+    const vers = await this.repo.listVersions(skillId)
+    const published = vers.filter((v) => v.status === 'published')
+    const current = skill?.currentVersionId
+      ? published.find((v) => v.id === skill.currentVersionId)?.version
+      : undefined
+    return { current, versions: published.map((v) => v.version) }
+  }
+
+  publicView(skill: SkillRecord, extra?: { mine?: FeedbackKind; includeDraft?: boolean; publishedVersion?: string; publishedVersions?: string[] }): Record<string, unknown> {
     const out: Record<string, unknown> = {
       id: skill.id,
       slug: skill.slug,
@@ -386,6 +411,8 @@ export class SkillsService {
       out.draftFrontmatter = skill.draftFrontmatter
       out.draftVersion = skill.draftVersion
     }
+    if (extra?.publishedVersion) out.publishedVersion = extra.publishedVersion
+    if (extra?.publishedVersions?.length) out.publishedVersions = extra.publishedVersions
     return out
   }
 

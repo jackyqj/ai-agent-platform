@@ -51,6 +51,7 @@ export interface Agent {
   approvalLevel?: string;
   approvalChain?: string[];
   status?: string;
+  skillUpdates?: Array<{ skillId: string; boundVersion: string; currentVersion: string }>;
 }
 
 export interface GraphProduct {
@@ -277,6 +278,8 @@ export interface SkillItem {
   draftBody?: string;
   draftFrontmatter?: Record<string, unknown>;
   draftVersion?: string;
+  publishedVersion?: string;
+  publishedVersions?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -483,6 +486,7 @@ export interface AgentSpec {
   modelRoute: { provider: string; model: string; pinned: boolean };
   persona: string;
   mcp: string[];
+  skills?: Array<{ skillId: string; version: string }>;
 }
 
 export interface SpecView {

@@ -40,7 +40,7 @@ export class AgentsController {
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.publish')
   async all() {
-    return { agents: await this.agents.list() }
+    return { agents: await this.agents.decorateSkillUpdates(await this.agents.list()) }
   }
 
   /** 管理员新建：基于模板复制已发布 spec 成草稿（免批准，可直接编排） */
@@ -264,5 +264,26 @@ export class AgentsController {
     const a = await this.agents.reject(id)
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
     return { agent: a, notice: '已拒绝（保持 draft）' }
+  }
+
+  @Get('plugin/agents')
+  @UseGuards(AuthGuard)
+  async pluginList(@Req() req: { user: { role: string; dept: string } }) {
+    const agents = await this.agents.listFor(req.user.role, req.user.dept)
+    return {
+      agents: agents.map((a) => ({
+        id: a.id, name: a.name, description: a.description, version: a.version, skillUpdates: a.skillUpdates ?? [],
+      })),
+    }
+  }
+
+  @Get('plugin/agents/:id')
+  @UseGuards(AuthGuard)
+  async pluginPack(@Req() req: { user: { role: string; dept: string } }, @Param('id') id: string) {
+    const visible = await this.agents.listFor(req.user.role, req.user.dept)
+    if (!visible.some((a) => a.id === id)) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+    const pack = await this.agents.pluginPack(id)
+    if (!pack) throw new HttpException('agent pack not found', HttpStatus.NOT_FOUND)
+    return pack
   }
 }

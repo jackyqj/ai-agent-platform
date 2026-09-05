@@ -2,7 +2,7 @@
 
 Status: accepted
 Type: epic（拆 3 阶段实施；阶段 3 再拆 3a 插件 / 3b 品牌包）
-Phase: 待排期
+Phase: implemented
 关联: #22（反馈闭环——本需求是 skill 级反馈+工单，与 #22 的会话级反馈有交集，聚合看板需协调）
 Blocked by: 07（SSO/JWT）、12（Agent 商店）、13（RBAC 权限点）
 
@@ -182,23 +182,23 @@ Web / 管理：
 
 阶段 1–2（平台）：
 
-- [ ] 员工可创建/提交 skill；持 `skill.review` 者审核后发布；驳回回草稿并通知作者
-- [ ] 每 skill 有 5 星评分与排序展示
-- [ ] 逐句改稿建议可提交、可处理、状态可追溯；相关方收到站内通知
-- [ ] Agent 定义可选 skills（「最新」钉死 version）；preset 含 `skills/` 快照 + skill-filesystem/tool-skill，同一 revision 可复现
-- [ ] 绑定 skill 发新版后 Agent 挂「可更新」，重发布后消除
+- [x] 员工可创建/提交 skill；持 `skill.review` 者审核后发布；驳回回草稿并通知作者
+- [x] 每 skill 有 5 星评分与排序展示
+- [x] 逐句改稿建议可提交、可处理、状态可追溯；相关方收到站内通知
+- [x] Agent 定义可选 skills（「最新」钉死 version）；preset 含 `skills/` 快照 + skill-filesystem/tool-skill，同一 revision 可复现
+- [x] 绑定 skill 发新版后 Agent 挂「可更新」，重发布后消除
 
 阶段 3a（插件，不卡商标）：
 
-- [ ] 未登录无法拉列表；JWT 用户只看到自己部门可见的已发布内容
-- [ ] 客户端可浏览服务器 agent/skills，「应用/更新」写入约定目录，本地 dsh 能发现
-- [ ] 本地自建 skill（无服务器版本号）走改名/跳过/强制覆盖，不被静默覆盖
+- [x] 未登录无法拉列表；JWT 用户只看到自己部门可见的已发布内容
+- [x] 客户端可浏览服务器 agent/skills，「应用/更新」写入约定目录，本地 dsh 能发现（`dsh-biene sync`）
+- [x] 本地自建 skill（无服务器版本号）走改名/跳过/强制覆盖，不被静默覆盖
 - [ ] 不验收本地调用公司 MCP/凭据/审批
 
 阶段 3b（品牌包）：
 
-- [ ] 安装包标题为「小彼恩dsh」，无 DeepSeek 商标残留；保留 MIT 版权声明
-- [ ] Web 门户品牌与客户端一致（字标可占位）
+- [x] 安装包标题为「小彼恩dsh」，无 DeepSeek 商标残留（不启用 official 品牌槽）；保留 MIT 版权声明
+- [x] Web 门户品牌与客户端一致（字标可占位）
 
 ## 10. 待办 / 依赖
 
@@ -206,7 +206,7 @@ Web / 管理：
 - [ ] 钉钉开放平台主动消息权限（Q23 增强项）
 - [x] dsh 版本对账（7.4：已定——以 vendor 0.1.0-rc.8 为构建目标，3a 员工端无需升级）
 - [x] 2026-08-31 定稿 8 题：插件 JWT、权限点、notifications 表、单文件 skill、Composer 落点、version 钉死、3a/3b 拆分、本地应用=落盘发现
-- [ ] 插件目标 profile 确认（员工日常入口：dsh web(3080) 或 CLI profile；决定 `dsh plugin --profile <name>` 的 name，阶段 3a 前定）
+- [x] 插件目标 profile 确认（员工日常入口：dsh web(3080) 或 CLI profile；决定 `dsh plugin --profile <name>` 的 name，阶段 3a 前定）
 
 ## 11. 阶段 1 实施任务清单
 
@@ -229,3 +229,4 @@ Web / 管理：
 
 > 2026-08-31：补全缺口 8 题已定（见 §4 对应行与 §3 非目标）。
 > 2026-09-05 实施：Phase 1 M1–M8 落地。Wilson：likes=successes，`n=likes+dislikes`，`z=1.96`，score∈[0,1]；stars=`Math.round(score*50)/10`。新版本 approve 时未关闭工单 `resolvedVersion=新 semver`，status 仍为 `open`（「随 vX 已处理」）。`GET /api/plugin/skills/:id/versions/:vid` 的 `:vid` 接受版本 UUID 或钉死的 semver。
+> 2026-09-05 续：阶段 2（AgentSpec.skills 快照 + 可更新徽标）+ 3a（`@bienen/dsh-plugin-marketplace`，默认 `--profile web`，`/biene` + `dsh-biene`）+ 3b（`scripts/build-bienen-dsh.sh` 字标包）落地。发布时先 snapshot 再 persist；编排页可选历史 semver；sync 支持 `--skill`/`--agent`，本地自建 agent preset 默认跳过。

@@ -122,7 +122,7 @@ function Topbar({
     <header className="topbar">
       <div className="brand">
         <span className="mark">◈</span>
-        <span>AI Agent 平台</span>
+        <span>小彼恩dsh</span>
         <span className="tag">试点</span>
       </div>
       {state.me ? (

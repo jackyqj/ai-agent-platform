@@ -31,7 +31,16 @@ export class SkillsController {
     const a = actor(req.user)
     const includeDraft = (s: { ownerId: string }) => s.ownerId === a.id || this.roles.can(a.role, 'skill.manage')
     const rows = await this.skills.list(a)
-    return { skills: rows.map((s) => this.skills.publicView(s, { includeDraft: includeDraft(s) })) }
+    const skills = []
+    for (const s of rows) {
+      const info = await this.skills.publishedVersionInfo(s.id)
+      skills.push(this.skills.publicView(s, {
+        includeDraft: includeDraft(s),
+        publishedVersion: info.current,
+        publishedVersions: info.versions,
+      }))
+    }
+    return { skills }
   }
 
   @Post('skills')

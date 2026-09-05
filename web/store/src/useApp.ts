@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
 import { buildSessionTitles, extractQuestionHint, formatSessionTitle, isQuotaError, tasksToMessages, waitForTaskResult } from './chat-utils';
-import { canKbManage, isFullAdmin, validateKbFile } from './kb-utils';
+import { canKbManage, canSkillManage, isFullAdmin, validateKbFile } from './kb-utils';
 import type { AdminPane, AgentSpec, AppState, ChatMessage, GraphComposeState, GraphNode, GraphSpec, KbVisibility, Me, Route, TaskView } from './types';
 import { localToIso } from './util';
 import { dropEdgesTouching, linearEdges, newStepId, wouldCreateCycle } from './graph-compose-utils';
@@ -426,6 +426,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       const parsed = parseLocation(location.hash, me);
       update({ me, route: parsed.route, adminPane: parsed.adminPane, showDevLogin: false });
       await loadStore();
+      if (parsed.skillId) await openSkill(parsed.skillId);
       if (isFullAdmin(me)) await loadAdminData();
       else if (canKbManage(me)) await loadKbAdminData();
       notify('已登录：' + me.name);
@@ -1442,6 +1443,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         const parsed = parseLocation(ssoToken ? '' : location.hash, me);
         setState((prev) => ({ ...prev, me, route: parsed.route, adminPane: parsed.adminPane }));
         await loadStore();
+        if (parsed.skillId) await openSkill(parsed.skillId);
         if (isFullAdmin(me)) await loadAdminData();
         else if (canKbManage(me)) await loadKbAdminData();
       } catch {
@@ -1530,7 +1532,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         description: f.description,
         body: f.body,
         version: f.version,
-        visibility: f.visibility,
+        ...(canSkillManage(state.me) ? { visibility: f.visibility } : {}),
         tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean),
       });
       notify(r.notice);
@@ -1666,12 +1668,15 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   return { state, act };
 }
 
-export function parseLocation(hash: string, me: Me | null): { route: Route; adminPane: AdminPane } {
+export function parseLocation(hash: string, me: Me | null): { route: Route; adminPane: AdminPane; skillId?: string } {
   const h = hash.replace(/^#/, '');
   const kbOk = canKbManage(me);
   const fullAdmin = isFullAdmin(me);
   if (h === 'chat' || h.startsWith('chat/')) return { route: 'chat', adminPane: 'workbench' };
-  if (h === 'skills' || h.startsWith('skills/')) return { route: 'skills', adminPane: 'workbench' };
+  if (h === 'skills' || h.startsWith('skills/')) {
+    const skillId = h.startsWith('skills/') ? h.slice('skills/'.length).split('/')[0] : undefined;
+    return { route: 'skills', adminPane: 'workbench', skillId: skillId || undefined };
+  }
   if (h.startsWith('admin')) {
     if (!kbOk) return { route: 'store', adminPane: 'workbench' };
     if (!fullAdmin) return { route: 'admin', adminPane: 'kb' };

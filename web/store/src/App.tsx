@@ -30,6 +30,11 @@ export default function App({ client }: { client?: Client }) {
     const onHash = () => {
       if (!state.me) return;
       const parsed = parseLocation(location.hash, state.me);
+      if (parsed.route === 'skills' && parsed.skillId) {
+        if (state.skillDetail?.id !== parsed.skillId) void act.openSkill(parsed.skillId);
+      } else if (parsed.route === 'skills' && !parsed.skillId && state.skillDetail) {
+        act.closeSkill();
+      }
       if (parsed.route !== state.route || parsed.adminPane !== state.adminPane) {
         act.update({
           route: parsed.route === 'chat' && !state.chat ? 'store' : parsed.route,
@@ -39,7 +44,7 @@ export default function App({ client }: { client?: Client }) {
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, [state.me, state.route, state.adminPane, state.chat, act]);
+  }, [state.me, state.route, state.adminPane, state.chat, state.skillDetail, act]);
 
   return (
     <div className="shell">
@@ -104,7 +109,7 @@ function Topbar({
           adminPane,
           chat: key === 'store' || key === 'skills' ? null : state.chat,
           skillCreating: false,
-          skillDetail: key === 'skills' ? state.skillDetail : null,
+          skillDetail: key === 'store' || key === 'skills' ? null : state.skillDetail,
         });
         history.replaceState(null, '', hash);
       }}

@@ -3,6 +3,11 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 import type { Client } from './store-client';
+import type { SkillItem } from './types';
+
+function stubSkill(status: SkillItem['status'] = 'draft'): SkillItem {
+  return { id: 'sk1', slug: 's', title: 's', description: '', status, likeCount: 0, dislikeCount: 0, score: 0, stars: 0 };
+}
 
 function fakeClient(overrides: Partial<Client> = {}): Client {
   return {
@@ -40,15 +45,15 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     listRevisions: vi.fn(async () => ({ revisions: [] })),
     rollback: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, version: 3, notice: 'ok' })),
     listSkills: vi.fn(async () => ({ skills: [] })),
-    createSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
-    getSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 } })),
-    patchSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'draft', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
-    submitSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'pending', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
-    archiveSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'archived', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
+    createSkill: vi.fn(async () => ({ skill: stubSkill('draft'), notice: 'ok' })),
+    getSkill: vi.fn(async () => ({ skill: stubSkill('draft') })),
+    patchSkill: vi.fn(async () => ({ skill: stubSkill('draft'), notice: 'ok' })),
+    submitSkill: vi.fn(async () => ({ skill: stubSkill('pending'), notice: 'ok' })),
+    archiveSkill: vi.fn(async () => ({ skill: stubSkill('archived'), notice: 'ok' })),
     listSkillVersions: vi.fn(async () => ({ versions: [] })),
-    addSkillVersion: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'pending', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
-    reviewSkill: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'published', likeCount: 0, dislikeCount: 0, score: 0, stars: 0 }, notice: 'ok' })),
-    skillFeedback: vi.fn(async () => ({ skill: { id: 'sk1', slug: 's', title: 's', description: '', status: 'published', likeCount: 1, dislikeCount: 0, score: 0.2, stars: 1 } })),
+    addSkillVersion: vi.fn(async () => ({ skill: stubSkill('pending'), notice: 'ok' })),
+    reviewSkill: vi.fn(async () => ({ skill: stubSkill('published'), notice: 'ok' })),
+    skillFeedback: vi.fn(async () => ({ skill: { ...stubSkill('published'), likeCount: 1, score: 0.2, stars: 1 } })),
     listChangeRequests: vi.fn(async () => ({ changeRequests: [] })),
     addChangeRequest: vi.fn(async () => ({ changeRequest: { id: 'cr', skillId: 'sk1', versionId: 'v', anchor: { line_no: 1, original_text: 'a' }, suggestedText: 'b', reason: '', requesterId: 'u', status: 'open' }, notice: 'ok' })),
     handleChangeRequest: vi.fn(async () => ({ changeRequest: { id: 'cr', skillId: 'sk1', versionId: 'v', anchor: { line_no: 1, original_text: 'a' }, suggestedText: 'b', reason: '', requesterId: 'u', status: 'adopted' } })),
@@ -365,12 +370,27 @@ describe('App', () => {
   it('opens the skill market from the nav', async () => {
     const client = fakeClient({
       listSkills: vi.fn(async () => ({
-        skills: [{ id: 'sk1', slug: 'leave-faq', title: '请假 FAQ', description: '请假', status: 'published', likeCount: 2, dislikeCount: 0, score: 0.4, stars: 2 }],
+        skills: [{ id: 'sk1', slug: 'leave-faq', title: '请假 FAQ', description: '请假', status: 'published' as const, likeCount: 2, dislikeCount: 0, score: 0.4, stars: 2 }],
       })),
     });
     const user = await loginAs(client);
     await user.click(screen.getByRole('link', { name: '技能' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: '技能' })).toBeInTheDocument());
     expect(screen.getByText('请假 FAQ')).toBeInTheDocument();
+  });
+
+  it('opens a skill from the hash on login', async () => {
+    window.history.replaceState(null, '', '/#skills/sk1');
+    const skill = { id: 'sk1', slug: 'leave-faq', title: '请假 FAQ', description: '请假', status: 'published' as const, likeCount: 2, dislikeCount: 0, score: 0.4, stars: 2 };
+    const client = fakeClient({
+      listSkills: vi.fn(async () => ({ skills: [skill] })),
+      getSkill: vi.fn(async () => ({ skill })),
+    });
+    const user = userEvent.setup();
+    render(<App client={client} />);
+    await expandDevLogin(user);
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: '请假 FAQ' })).toBeInTheDocument());
+    expect(client.getSkill).toHaveBeenCalledWith('sk1');
   });
 });

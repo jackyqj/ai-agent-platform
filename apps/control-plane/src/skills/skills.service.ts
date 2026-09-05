@@ -105,6 +105,7 @@ export class SkillsService {
     }
     if (input.tags !== undefined) skill.tags = input.tags
     if (input.visibility !== undefined) {
+      if (!this.roles.can(actor.role, 'skill.manage')) throw new SkillsError('无权改可见性', 403)
       this.assertVisibility(input.visibility, input.departmentId ?? skill.departmentId, actor)
       skill.visibility = input.visibility
       skill.departmentId = input.visibility === 'department' ? (input.departmentId ?? actor.dept) : undefined
@@ -243,12 +244,12 @@ export class SkillsService {
 
   async publishedMarkdown(skillId: string, actor: SkillActor, versionId?: string): Promise<{ frontmatter: Record<string, unknown>; body: string; markdown: string; version: string }> {
     const skill = await this.get(skillId, actor)
-    if (skill.status !== 'published' && !this.roles.can(actor.role, 'skill.review') && skill.ownerId !== actor.id) {
-      throw new SkillsError('skill 不存在', 404)
-    }
+    if (skill.status !== 'published') throw new SkillsError('skill 不存在', 404)
     let ver: SkillVersion | undefined
     if (versionId) {
-      ver = await this.repo.getVersion(versionId)
+      ver = SEMVER_RE.test(versionId)
+        ? await this.repo.getVersionBySemver(skillId, versionId)
+        : await this.repo.getVersion(versionId)
       if (!ver || ver.skillId !== skillId) throw new SkillsError('版本不存在', 404)
     } else if (skill.currentVersionId) {
       ver = await this.repo.getVersion(skill.currentVersionId)
@@ -315,7 +316,9 @@ export class SkillsService {
     }
     await this.repo.insertChangeRequest(cr)
     await this.audit.append({ userId: actor.id, eventType: 'skill.change_request.open', payload: { skillId, id: cr.id } })
-    await this.inbox.notify(skill.ownerId, 'change_request.opened', { skillId, slug: skill.slug, changeRequestId: cr.id, by: actor.id })
+    if (actor.id !== skill.ownerId) {
+      await this.inbox.notify(skill.ownerId, 'change_request.opened', { skillId, slug: skill.slug, changeRequestId: cr.id, by: actor.id })
+    }
     return cr
   }
 

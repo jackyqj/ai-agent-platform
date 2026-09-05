@@ -98,6 +98,4 @@ export class SkillsError extends Error {
   }
 }
 
-export function starsOf(score: number): number {
-  return Math.round(score * 50) / 10
-}
+export { starsFromWilson as starsOf } from './wilson.js'

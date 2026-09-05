@@ -137,6 +137,46 @@ test('archive is admin-only and hides from the catalog', async () => {
   assert.equal((await skills.listPublished(employee2)).length, 0)
 })
 
+test('author cannot change visibility; skill.manage can', async () => {
+  const { skills } = harness()
+  const s = await skills.create({ slug: 'vis', title: '可见性', body: 'x', visibility: 'company' }, employee)
+  await assert.rejects(
+    () => skills.patch(s.id, { visibility: 'department' }, employee),
+    (e: unknown) => e instanceof SkillsError && e.httpStatus === 403,
+  )
+  const updated = await skills.patch(s.id, { visibility: 'department', departmentId: 'HR/行政' }, admin)
+  assert.equal(updated.visibility, 'department')
+})
+
+test('opening a change request does not notify the author when they file it themselves', async () => {
+  const { skills, inbox } = harness()
+  const s = await skills.create({ slug: 'self-cr', title: '自提', body: '句。' }, employee)
+  await skills.submit(s.id, employee)
+  await skills.review(s.id, (await skills.listVersions(s.id, developer))[0]!.id, 'approve', developer)
+  await inbox.markRead(employee.id)
+  await skills.addChangeRequest(s.id, { lineNo: 1, originalText: '句。', suggestedText: '改。' }, employee)
+  assert.equal((await inbox.list(employee.id)).notifications.some((n) => n.kind === 'change_request.opened'), false)
+})
+
+test('plugin markdown is unpublished after archive and versions can be pinned by semver', async () => {
+  const { skills } = harness()
+  const s = await skills.create({ slug: 'pin-me', title: '钉死', body: '一。' }, employee)
+  await skills.submit(s.id, employee)
+  await skills.review(s.id, (await skills.listVersions(s.id, developer))[0]!.id, 'approve', developer)
+  const md = await skills.publishedMarkdown(s.id, employee2, '0.1.0')
+  assert.equal(md.version, '0.1.0')
+  assert.match(md.markdown, /一。/)
+  await skills.archive(s.id, admin)
+  await assert.rejects(
+    () => skills.publishedMarkdown(s.id, employee2),
+    (e: unknown) => e instanceof SkillsError && e.httpStatus === 404,
+  )
+  await assert.rejects(
+    () => skills.publishedMarkdown(s.id, employee),
+    (e: unknown) => e instanceof SkillsError && e.httpStatus === 404,
+  )
+})
+
 test('marking notifications read is idempotent and scoped to the user', async () => {
   const { skills, inbox } = harness()
   const s = await skills.create({ slug: 'n1', title: '通知', body: 'a' }, employee)

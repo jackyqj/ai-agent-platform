@@ -228,4 +228,4 @@ Web / 管理：
 ## Comments
 
 > 2026-08-31：补全缺口 8 题已定（见 §4 对应行与 §3 非目标）。
-> 2026-08-31 收口：Status → accepted。评审挂起两项已定稿进 §5.4（双层 status 规则、tags=text[]）；插件 API 补 `/api/plugin/skills/:id/versions/:vid`（§5.5）。仍挂起不阻塞：Wilson→5 星公式、工单「随 vX 已处理」标记、#22 看板共用（开工后定，见 §9 验收前）；插件目标 profile 实施时确认（§10）。
+> 2026-09-05 实施：Phase 1 M1–M8 落地。Wilson：likes=successes，`n=likes+dislikes`，`z=1.96`，score∈[0,1]；stars=`Math.round(score*50)/10`。新版本 approve 时未关闭工单 `resolvedVersion=新 semver`，status 仍为 `open`（「随 vX 已处理」）。`GET /api/plugin/skills/:id/versions/:vid` 的 `:vid` 接受版本 UUID 或钉死的 semver。

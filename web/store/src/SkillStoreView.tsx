@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type Actions } from './useApp';
@@ -15,11 +16,26 @@ function sentences(body: string): Array<{ text: string; line: number }> {
   return out;
 }
 
-function statusTone(status: string): 'b-ok' | 'b-warn' | 'b-cloud' | 'b-private' {
+type Tone = 'b-ok' | 'b-warn' | 'b-cloud' | 'b-private';
+
+function skillStatusTone(status: SkillItem['status']): Tone {
   switch (status) {
     case 'published': return 'b-ok';
     case 'pending': return 'b-warn';
     case 'archived': return 'b-private';
+    case 'draft': return 'b-cloud';
+    default: {
+      const _s: never = status;
+      throw new Error(`未知 skill 状态：${String(_s)}`);
+    }
+  }
+}
+
+function requestStatusTone(status: string): Tone {
+  switch (status) {
+    case 'adopted': return 'b-ok';
+    case 'open': return 'b-warn';
+    case 'rejected': return 'b-private';
     default: return 'b-cloud';
   }
 }
@@ -29,8 +45,9 @@ export default function SkillStoreView({ state, act }: { state: AppState; act: A
   const canReview = canSkillReview(me);
   const canManage = canSkillManage(me);
   const pending = state.skillVersions.filter((v) => v.status === 'pending');
+  const [tagFilter, setTagFilter] = useState('');
 
-  if (state.skillCreating) return <SkillEditor state={state} act={act} creating />;
+  if (state.skillCreating) return <SkillEditor state={state} act={act} creating canManage={canManage} />;
   if (state.skillDetail) {
     return (
       <SkillDetail
@@ -43,6 +60,11 @@ export default function SkillStoreView({ state, act }: { state: AppState; act: A
     );
   }
 
+  const needle = tagFilter.trim().toLowerCase();
+  const shown = needle
+    ? state.skills.filter((s) => (s.tags ?? []).some((t) => t.toLowerCase().includes(needle)))
+    : state.skills;
+
   return (
     <div className="store">
       <header className="store-hero">
@@ -52,18 +74,26 @@ export default function SkillStoreView({ state, act }: { state: AppState; act: A
       </header>
       <div className="toolbar">
         <button onClick={() => act.update({ skillCreating: true, skillDetail: null })}>新建 skill</button>
+        <label className="muted">标签过滤
+          <input
+            aria-label="标签过滤"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            placeholder="按 tag 过滤"
+          />
+        </label>
       </div>
       {canReview ? <ReviewHint skills={state.skills} act={act} /> : null}
       <section className="section">
-        {state.skills.length === 0 ? (
+        {shown.length === 0 ? (
           <Empty>还没有可见的 skill。点「新建 skill」提交第一篇。</Empty>
         ) : (
           <div className="agents">
-            {state.skills.map((s) => (
+            {shown.map((s) => (
               <button key={s.id} className="agent-card" onClick={() => void act.openSkill(s.id)}>
                 <div className="agent-card-head">
                   <strong>{s.title}</strong>
-                  <Badge tone={statusTone(s.status)}>{s.status}</Badge>
+                  <Badge tone={skillStatusTone(s.status)}>{s.status}</Badge>
                 </div>
                 <p className="muted">{s.description || s.slug}</p>
                 <div className="skill-meta">
@@ -98,9 +128,10 @@ function ReviewHint({ skills, act }: { skills: SkillItem[]; act: Actions }) {
   );
 }
 
-function SkillEditor({ state, act, creating }: { state: AppState; act: Actions; creating?: boolean }) {
+function SkillEditor({ state, act, creating, canManage }: { state: AppState; act: Actions; creating?: boolean; canManage?: boolean }) {
   const f = state.skillForm;
   const set = (patch: Partial<AppState['skillForm']>) => act.update({ skillForm: { ...f, ...patch } });
+  const visLocked = !creating && !canManage;
   return (
     <div className="store">
       <header className="store-hero">
@@ -113,7 +144,7 @@ function SkillEditor({ state, act, creating }: { state: AppState; act: Actions; 
         <label>简介<input value={f.description} onChange={(e) => set({ description: e.target.value })} /></label>
         <label>版本<input value={f.version} onChange={(e) => set({ version: e.target.value })} /></label>
         <label>可见性
-          <select value={f.visibility} onChange={(e) => set({ visibility: e.target.value })}>
+          <select value={f.visibility} disabled={visLocked} onChange={(e) => set({ visibility: e.target.value })}>
             <option value="company">全公司</option>
             <option value="department">仅本部门</option>
           </select>
@@ -166,7 +197,7 @@ function SkillDetail({
         <h1>{s.title}</h1>
         <p className="lead">{s.description}</p>
         <div className="skill-meta">
-          <Badge tone={statusTone(s.status)}>{s.status}</Badge>
+          <Badge tone={skillStatusTone(s.status)}>{s.status}</Badge>
           <span>★ {s.stars.toFixed(1)}</span>
           <span>{s.likeCount} 赞 · {s.dislikeCount} 踩</span>
         </div>
@@ -183,7 +214,7 @@ function SkillDetail({
         {canManage && s.status !== 'archived' ? <button className="ghost" onClick={() => void act.archiveSkill()}>下架</button> : null}
       </div>
 
-      {isOwner || canManage ? <SkillEditor state={state} act={act} /> : null}
+      {isOwner || canManage ? <SkillEditor state={state} act={act} canManage={canManage} /> : null}
 
       {canReview && pending.length > 0 ? (
         <section className="section">
@@ -194,7 +225,13 @@ function SkillDetail({
               <pre className="skill-body">{v.body}</pre>
               <div className="toolbar">
                 <button onClick={() => void act.reviewSkill(v.id, 'approve')}>通过</button>
-                <button className="ghost" onClick={() => void act.reviewSkill(v.id, 'reject', '请补充说明')}>驳回</button>
+                <button className="ghost" onClick={() => {
+                  const comment = window.prompt('驳回理由');
+                  if (comment === null) return;
+                  const reason = comment.trim();
+                  if (!reason) return;
+                  void act.reviewSkill(v.id, 'reject', reason);
+                }}>驳回</button>
               </div>
             </div>
           ))}
@@ -241,7 +278,7 @@ function SkillDetail({
           <ul className="plain">
             {state.skillRequests.map((c) => (
               <li key={c.id} className="card">
-                <div><Badge tone={statusTone(c.status)}>{c.status}</Badge> {c.suggestedText}</div>
+                <div><Badge tone={requestStatusTone(c.status)}>{c.status}</Badge> {c.suggestedText}</div>
                 {c.reason ? <p className="muted">{c.reason}</p> : null}
                 {c.resolvedVersion ? <p className="muted">随 v{c.resolvedVersion} 已处理</p> : null}
                 {c.status === 'open' && (isOwner || canReview) ? (

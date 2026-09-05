@@ -256,6 +256,8 @@ export interface ModelsBody {
 
 export type Route = 'store' | 'admin' | 'chat' | 'skills';
 
+export type SkillStatus = 'draft' | 'pending' | 'published' | 'archived';
+
 export interface SkillItem {
   id: string;
   slug: string;
@@ -265,7 +267,7 @@ export interface SkillItem {
   visibility?: string;
   departmentId?: string;
   tags?: string[];
-  status: string;
+  status: SkillStatus;
   currentVersionId?: string;
   likeCount: number;
   dislikeCount: number;

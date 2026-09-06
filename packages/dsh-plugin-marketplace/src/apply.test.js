@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSync } from './apply.js'
-import { handleBieneCommand } from './index.js'
+import { apply, handleBieneCommand } from './index.js'
 
 function memApi(routes) {
   return async (_cfg, path) => {
@@ -87,4 +87,15 @@ test('handleBieneCommand help does not hit the network', async () => {
   const r = await handleBieneCommand('help')
   assert.equal(r.kind, 'success')
   assert.match(r.text, /dsh-biene login/)
+})
+
+test('apply registers /biene without requiring a webServer', () => {
+  const names = []
+  const injects = []
+  apply({
+    commands: { register: (def) => { names.push(def.name) } },
+    inject: (deps) => { injects.push(deps) },
+  })
+  assert.deepEqual(names, ['biene'])
+  assert.deepEqual(injects, [['webServer']])
 })

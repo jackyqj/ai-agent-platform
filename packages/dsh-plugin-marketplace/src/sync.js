@@ -8,6 +8,15 @@ export function planSkillApply(local, remote) {
   return { action: 'overwrite', from: local.meta?.version, to: remote.version }
 }
 
+/** Panel/HTTP catalog row state derived from the same apply plan. */
+export function catalogState(local, remote) {
+  const plan = planSkillApply(local, remote)
+  if (plan.action === 'write') return 'missing'
+  if (plan.action === 'conflict') return 'conflict'
+  if (plan.from === plan.to) return 'current'
+  return 'update'
+}
+
 export function parseSkillMeta(markdown) {
   const m = markdown.match(/^---\n([\s\S]*?)\n---/)
   if (!m) return {}

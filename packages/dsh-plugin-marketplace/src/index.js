@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
-import { loadConfig } from './auth.js'
+import { api, loadConfig } from './auth.js'
 import { runSync } from './apply.js'
+import { createMarketHandlers } from './routes.js'
 
 /** Host-plane bundle entry. CLI lives in ./cli.js (`dsh-biene`). */
 export const name = 'bienen-market'
@@ -42,12 +43,28 @@ export async function handleBieneCommand(rawInput, deps = {}) {
   }
 }
 
-/** Register `/biene` so the web sidebar command palette can sync without leaving dsh. */
+/** Register `/biene` and, when a web server exists, the sidebar panel routes. */
 export function apply(ctx) {
   ctx.commands.register({
     name: 'biene',
     description: '同步小彼恩已发布 skill / agent 到本机',
     input: { hint: 'sync [--force]' },
     handler: (invocation) => handleBieneCommand(invocation.rawInput),
+  })
+  ctx.inject(['webServer'], (web) => {
+    const handlers = createMarketHandlers({
+      dshHome: dshHome(),
+      loadConfig,
+      request: api,
+      runSync,
+    })
+    web.effect(
+      () => web.webServer.register({ kind: 'exact', path: '/bienen/status', handler: handlers.status }),
+      'bienen-market /bienen/status',
+    )
+    web.effect(
+      () => web.webServer.register({ kind: 'exact', path: '/bienen/apply', handler: handlers.apply }),
+      'bienen-market /bienen/apply',
+    )
   })
 }

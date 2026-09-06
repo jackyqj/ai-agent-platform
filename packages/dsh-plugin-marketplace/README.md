@@ -4,12 +4,16 @@
 
 默认打进员工现有 **web** profile（`dsh web` / 端口 3080）。公司内部 `company` profile 同样可用。
 
-客户端双入口：终端 `dsh-biene`，以及插件加载后聊天框 `/biene sync`。钉钉回调域名是商店前端，复制 `#token=` 即可（控制面 OIDC redirect 不指向本机端口）。
+客户端入口：终端 `dsh-biene`、聊天框 `/biene sync`，以及侧栏底「小彼恩」面板（看状态 / 应用 / 更新）。钉钉回调域名是商店前端，复制 `#token=` 即可（控制面 OIDC redirect 不指向本机端口）。
+
+登录仍在终端。面板不持 JWT，只请求本机 dsh 的 `GET /bienen/status` 与 `POST /bienen/apply`。冲突项不会被面板覆盖（终端加 `--force`）。
+
+改客户端 UI 后需重新打包浏览器半侧：`npm install && npm run bundle`（产出仓库内的 `client.js`）。
 
 ## 安装
 
 ```sh
-# 同事已有官方 dsh（0.1.1-rc.2 或与本仓库 vendor 对齐的 0.1.0-rc.8）
+# 同事已有官方 dsh（npm latest 或与本仓库 vendor 对齐的 0.1.3-alpha.1）
 dsh plugin --profile web add /path/to/ai-agent-platform/packages/dsh-plugin-marketplace
 
 # CLI（不必先 plugin add）

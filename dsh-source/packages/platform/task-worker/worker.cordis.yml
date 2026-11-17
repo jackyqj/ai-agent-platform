@@ -1,125 +1,63 @@
 # 平台任务 Worker 运行时组合（19 工单）
-# 由 dsh-jsonrpc-agent bin 启动（node .../lib/bin.js 本文件），经 stdio JSON-RPC 服务 SDK client。
-# stdout 专属于协议：本文件不得挂 stdout logger。
+# 作为 `sdk` profile 的 --patch：stdout 专属于 JSON-RPC，本文件不得挂 stdout logger。
+# 子进程由 `@deepseek-ai/dsh-sdk-client` 以 `dsh --profile sdk --patch <本文件>` 启动。
 
-- id: sdk-jsonrpc-server
-  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
-
-# D20：每请求从 PG vault 解析 apiKeyEnv（不把模型密钥注入进程 env）
-- id: credentials-pg
+- id: credentials
   name: '@deepseek-ai/dsh-credentials-pg'
   config:
     url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
     masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
 
-# 模型：经 LiteLLM（apiKeyEnv=GATEWAY_KEY + baseURL 指向网关）。
-# 缺 baseURL 时 dsh-llm-deepseek 会回落到 https://api.deepseek.com，
-# 再用 GATEWAY_KEY 去打官方 API → Authentication Fails …****788e。
-- id: llm-deepseek
-  name: '@deepseek-ai/dsh-llm-deepseek'
-  config:
-    apiKeyEnv: GATEWAY_KEY
-    baseURL: !!js process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:4001/v1'
-    streamIdleTimeoutMs: 172800000
-    models:
-      - id: !!js process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
-        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
-
-# 沙箱：任务工作区（只读知识库检索场景，保守用 workspace 写限）
-- id: sandbox
-  name: '@deepseek-ai/dsh-sandbox-local'
-- id: sandbox-policy
-  name: '@deepseek-ai/dsh-sandbox-policy'
-  config:
-    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
-    workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
-- id: subprocess
-  name: '@deepseek-ai/dsh-subprocess-local'
-- id: fs-local
-  name: '@deepseek-ai/dsh-fs-local'
-  config:
-    cwd: !!js process.env.DSH_CWD ?? process.cwd()
-
-# 公司 AI 助手 spine（非编码 agent）
-- id: agent-spine
-  name: '@deepseek-ai/dsh-agent-spine-demo'
+- id: system-prompt
   config:
     includeHarnessIdentity: false
     includeRuntimeContext: false
     persona: !!js process.env.DSH_SYSTEM_PROMPT ?? '你是「公司 AI 助手」。你必须通过工具获取事实：查制度用 knowledge_search（kb 工具），查数据用 list_tables 和 query_readonly（db 工具）。规则：1) 需要数据时，第一步必须先实际调用 list_tables 看表结构，禁止猜测表名；2) 然后调用 query_readonly 执行 SELECT；3) 工具返回什么就汇报什么，禁止编造工具输出；4) 如果工具调用失败，如实说明，不要假装成功。'
-    workspaceContext: false
-    skills:
-      enabled: false
-    toolBash: false
-    toolJobs: false
 
-# 知识库 MCP（04 工单 Server）
-- id: mcp-kb
-  name: '@deepseek-ai/dsh-mcp-client'
+- id: llm-deepseek
   config:
-    serverName: kb
-    transport: stdio
-    command: node
-    args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
-    env:
-      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
-      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
-      EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
+    apiKeyEnv: GATEWAY_KEY
+    baseURL: !!js process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:4001/v1'
+    streamIdleTimeoutMs: 172800000
+    defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
 
-# 只读数据库 MCP（试点报表场景，SELECT-only + 白名单）
-- id: mcp-db
-  name: '@deepseek-ai/dsh-mcp-client'
+- id: sandbox-policy
   config:
-    serverName: db
-    transport: stdio
-    command: node
-    args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-db/dist/index.js']
-    env:
-      DB_DSN: !!js process.env.DB_DSN ?? 'postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
-      DB_ALLOWED_TABLES: demo_sales.regions,demo_sales.products,demo_sales.orders
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
 
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
 
-# ── 子代理与工作流（21 工单：模型编写的编排脚本可扇出子代理）────────────────
-- id: subagent
-  name: '@deepseek-ai/dsh-subagent'
-- id: subagent-spawn-in-process
-  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
-  config:
-    providerName: spawn
-- id: subagent-fork-in-process
-  name: '@deepseek-ai/dsh-subagent-fork-in-process'
-  config:
-    providerName: fork
-- id: tool-subagent-control
-  name: '@deepseek-ai/dsh-tool-subagent-control'
-- id: tool-subagent-list-agents
-  name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
-- id: tool-subagent
-  name: '@deepseek-ai/dsh-tool-subagent'
-  config:
-    provider: spawn
-    toolName: subagent
-    backgroundMode: continuable
-- id: tool-subagent-fork
-  name: '@deepseek-ai/dsh-tool-subagent'
-  config:
-    provider: fork
-    toolName: subagent_fork
-    backgroundMode: one-shot
-- id: tool-subagent-report
-  name: '@deepseek-ai/dsh-tool-subagent-report'
-- id: workflow-worker-thread
-  name: '@deepseek-ai/dsh-workflow-worker-thread'
-  config:
-    provider: spawn
-- id: tool-workflow
-  name: '@deepseek-ai/dsh-tool-workflow'
-- id: timeout-policy
-  name: '@deepseek-ai/dsh-tool-call-timeout-policy'
-
-# 会话持久化：JSONL（worker 本地；跨实例共享由 08 的 PG Provider 负责，交互会话走共享库）
 - id: session-persistence-jsonl
-  name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
     root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions-worker'
     compression: none
+
+- insert:
+    - id: mcp-kb
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb
+        transport: stdio
+        command: node
+        args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
+        env:
+          KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
+          KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
+          EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
+
+    - id: mcp-db
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: db
+        transport: stdio
+        command: node
+        args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-db/dist/index.js']
+        env:
+          DB_DSN: !!js process.env.DB_DSN ?? 'postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
+          DB_ALLOWED_TABLES: demo_sales.regions,demo_sales.products,demo_sales.orders

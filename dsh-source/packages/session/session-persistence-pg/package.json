@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-session-persistence-pg",
   "description": "PostgreSQL durable session persistence backend for the DeepSeek Harness (platform-owned, 08 工单)",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.3-alpha.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -28,17 +28,20 @@
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^"
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
-    "pg": "^8.13.0"
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
-    "@types/pg": "^8.11.0",
-    "@deepseek-ai/dsh-invariants": "workspace:^"
+    "@types/pg": "^8.15.5",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^"
   }
 }

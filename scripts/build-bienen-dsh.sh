@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 3b：从 vendor rc.8 构建「小彼恩dsh」npm 包（字标占位，不注入 DeepSeek official 品牌槽）。
+# 3b：从 vendor 0.1.3-alpha.1 构建「小彼恩dsh」npm 包（字标占位，不注入 DeepSeek official 品牌槽）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DSH="$ROOT/dsh-source"
@@ -36,18 +36,17 @@ cleanup() { restore "$FAV"; restore "$MAN"; }
 trap cleanup EXIT
 
 export DSH_CLIENT_TITLE="${DSH_CLIENT_TITLE:-小彼恩dsh}"
-# 故意不设 official，避免 ui-brand-official 注入 DeepSeek 商标。
-unset DSH_CLIENT_BUILD_PROFILE || true
-export DSH_BUILD_CLIENT_PROFILE="${DSH_BUILD_CLIENT_PROFILE:-}"
+# dsh build.ts 把 DSH_BUILD_CLIENT_PROFILE 的空字符串当成未知 profile。
+# 必须整项 unset：未设置 → 继承 DSH_CLIENT_TITLE；official → DeepSeek 鱼标。
+unset DSH_CLIENT_BUILD_PROFILE DSH_BUILD_CLIENT_PROFILE || true
 
 cd "$DSH"
 pnpm install
 pnpm run build
 
 mkdir -p "$OUT"
-if [[ -f scripts/release/pack.ts ]]; then
-  pnpm exec tsx scripts/release/pack.ts --family dsh
-fi
+# pack.ts --family dsh 会强制官方标题「DeepSeek Harness」，品牌包走自己的打包。
+pnpm exec tsx "$ROOT/scripts/pack-bienen-dsh.ts" --out dist/npm
 shopt -s nullglob
 copied=()
 if [[ -d dist/npm ]]; then

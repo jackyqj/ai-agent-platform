@@ -31,7 +31,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function updates(ctx: Context): CredentialRef[] {
   const seen: CredentialRef[] = []
-  ctx.on('credentials/updated', (ref) => { seen.push(ref) })
+  ctx.on('credentials/reference-updated', (ref) => { seen.push(ref) })
   return seen
 }
 

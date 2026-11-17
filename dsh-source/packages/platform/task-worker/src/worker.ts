@@ -30,7 +30,7 @@ const cfg = {
 const runtimeModel = process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
 const runtimeViaGateway = runtimeModel.startsWith('cloud/')
 const runtime = {
-  bin: process.env.CP_RUNTIME_BIN ?? fileURLToPath(new URL('../../../examples/jsonrpc-demo/lib/bin.js', import.meta.url)),
+  dshBin: process.env.CP_RUNTIME_BIN,
   cordis: process.env.CP_RUNTIME_CORDIS ?? fileURLToPath(new URL('../worker.cordis.yml', import.meta.url)),
   // cloud/* → LiteLLM；直连模型 → api.deepseek.com（可用 DEEPSEEK_BASE_URL 覆盖）。
   model: runtimeModel,
@@ -167,26 +167,24 @@ async function runWithCancel(
 
   try {
     harness = new DeepSeekHarness({
-      launch: {
-        command: process.execPath,
-        args: [runtime.bin, runtime.cordis],
-        // rc.8: a provided env object replaces the child environment entirely.
-        env: {
-          ...process.env,
-          DATABASE_URL,
-          PG_DSN: DATABASE_URL,
-          SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
-          CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
-          DEEPSEEK_BASE_URL: runtime.baseURL,
-          DSH_CWD: runtime.workspace,
-          DSH_MODEL: runtime.model,
-          EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
-          // Gateway path: credentials-pg prefers vault; env is fallback for local boots.
-          GATEWAY_KEY: (await resolveRef('GATEWAY_KEY')) || process.env.GATEWAY_KEY || '',
-          // Direct-path fallback only.
-          DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
-          DSH_PERMISSION_MODE: permissionMode,
-        },
+      profile: 'sdk',
+      patches: [runtime.cordis],
+      ...runtime.dshBin === undefined ? {} : { dshBin: runtime.dshBin },
+      cwd: runtime.workspace,
+      env: {
+        ...process.env,
+        DATABASE_URL,
+        PG_DSN: DATABASE_URL,
+        SECRETS_MASTER_KEY: process.env.SECRETS_MASTER_KEY || process.env.CP_JWT_SECRET || '',
+        CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
+        DEEPSEEK_BASE_URL: runtime.baseURL,
+        GATEWAY_BASE_URL: runtime.baseURL,
+        DSH_CWD: runtime.workspace,
+        DSH_MODEL: runtime.model,
+        EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
+        GATEWAY_KEY: (await resolveRef('GATEWAY_KEY')) || process.env.GATEWAY_KEY || '',
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
+        DSH_PERMISSION_MODE: permissionMode,
       },
       provider: 'deepseek-official',
       model: runtime.model,

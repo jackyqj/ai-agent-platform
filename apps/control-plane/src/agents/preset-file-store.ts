@@ -2,16 +2,18 @@
 // 唯一碰磁盘的地方：把 serialize 产物原子写进 preset root/<id>/。
 // 生产 adapter 是磁盘（原子写），测试 adapter 是内存。
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** DI token（interface 不能作 token，用字符串常量） */
 export const PRESET_FILE_STORE = 'PRESET_FILE_STORE' as const
 
 export interface PresetFileStore {
-  write(id: string, cordisYaml: string, presetYaml: string): Promise<void>
+  write(id: string, cordisYaml: string, presetYaml: string, skillFiles?: Record<string, string>): Promise<void>
   /** 读磁盘上的 agent.cordis.yml（漂移对照用）；不存在返回 undefined。 */
   read(id: string): Promise<string | undefined>
+  /** 读 preset 目录全部文本文件（插件打包用）。 */
+  readPack?(id: string): Promise<Record<string, string> | undefined>
   /** 删除该 agent 的 preset 目录（删除 Agent 时调用）。 */
   remove(id: string): Promise<void>
 }
@@ -27,15 +29,38 @@ async function atomicWrite(path: string, content: string): Promise<void> {
 export class DiskPresetFileStore implements PresetFileStore {
   constructor(private readonly root: string) {}
 
-  async write(id: string, cordisYaml: string, presetYaml: string): Promise<void> {
+  async write(id: string, cordisYaml: string, presetYaml: string, skillFiles?: Record<string, string>): Promise<void> {
     const dir = join(this.root, id)
     await mkdir(dir, { recursive: true })
     await atomicWrite(join(dir, 'agent.cordis.yml'), cordisYaml)
     await atomicWrite(join(dir, 'preset.yml'), presetYaml)
+    const skillsDir = join(dir, 'skills')
+    await rm(skillsDir, { recursive: true, force: true })
+    for (const [slug, markdown] of Object.entries(skillFiles ?? {})) {
+      const dest = join(skillsDir, slug)
+      await mkdir(dest, { recursive: true })
+      await atomicWrite(join(dest, 'SKILL.md'), markdown)
+    }
   }
 
   async read(id: string): Promise<string | undefined> {
     return readFile(join(this.root, id, 'agent.cordis.yml'), 'utf8').catch(() => undefined)
+  }
+
+  async readPack(id: string): Promise<Record<string, string> | undefined> {
+    const dir = join(this.root, id)
+    const cordis = await this.read(id)
+    if (cordis === undefined) return undefined
+    const files: Record<string, string> = { 'agent.cordis.yml': cordis }
+    const preset = await readFile(join(dir, 'preset.yml'), 'utf8').catch(() => undefined)
+    if (preset !== undefined) files['preset.yml'] = preset
+    const skillsDir = join(dir, 'skills')
+    const slugs = await readdir(skillsDir).catch(() => [] as string[])
+    for (const slug of slugs) {
+      const md = await readFile(join(skillsDir, slug, 'SKILL.md'), 'utf8').catch(() => undefined)
+      if (md !== undefined) files[`skills/${slug}/SKILL.md`] = md
+    }
+    return files
   }
 
   async remove(id: string): Promise<void> {
@@ -45,21 +70,34 @@ export class DiskPresetFileStore implements PresetFileStore {
 
 /** 内存 adapter：测试用，断言产物而不碰磁盘。 */
 export class MemoryPresetFileStore implements PresetFileStore {
-  readonly files = new Map<string, { cordisYaml: string; presetYaml: string }>()
+  readonly files = new Map<string, { cordisYaml: string; presetYaml: string; skillFiles: Record<string, string> }>()
 
-  async write(id: string, cordisYaml: string, presetYaml: string): Promise<void> {
-    this.files.set(id, { cordisYaml, presetYaml })
+  async write(id: string, cordisYaml: string, presetYaml: string, skillFiles?: Record<string, string>): Promise<void> {
+    this.files.set(id, { cordisYaml, presetYaml, skillFiles: { ...(skillFiles ?? {}) } })
   }
 
   async read(id: string): Promise<string | undefined> {
     return this.files.get(id)?.cordisYaml
   }
 
+  async readPack(id: string): Promise<Record<string, string> | undefined> {
+    const row = this.files.get(id)
+    if (!row) return undefined
+    const files: Record<string, string> = {
+      'agent.cordis.yml': row.cordisYaml,
+      'preset.yml': row.presetYaml,
+    }
+    for (const [slug, md] of Object.entries(row.skillFiles)) {
+      files[`skills/${slug}/SKILL.md`] = md
+    }
+    return files
+  }
+
   async remove(id: string): Promise<void> {
     this.files.delete(id)
   }
 
-  get(id: string): { cordisYaml: string; presetYaml: string } | undefined {
+  get(id: string): { cordisYaml: string; presetYaml: string; skillFiles: Record<string, string> } | undefined {
     return this.files.get(id)
   }
 }

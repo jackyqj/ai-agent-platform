@@ -16,7 +16,10 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import pg from 'pg'
 import { CredentialProvider, credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
+import type {
+  CredentialInfo, CredentialKey, CredentialRecord, CredentialRecordEntry, CredentialRecordInfo,
+  CredentialRef, ResolvedCredential,
+} from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { decrypt, encrypt } from './crypto.ts'
 
@@ -109,6 +112,7 @@ export class PgCredentialProvider extends CredentialProvider {
 
   private readonly spec: ResolvedSpec
   private readonly memory = new Map<string, StoredRow>()
+  private readonly records = new Map<string, CredentialRecord>()
   private pool: pg.Pool | undefined
   private closed = false
 
@@ -185,6 +189,43 @@ export class PgCredentialProvider extends CredentialProvider {
     this.assertOpen('unset', ref)
     const existed = await this.deleteVault(ref)
     if (existed) this.notifyUpdated(ref)
+  }
+
+  override async readRecord(key: CredentialKey): Promise<CredentialRecord | undefined> {
+    return this.records.get(key)
+  }
+
+  override async describeRecord(key: CredentialKey): Promise<CredentialRecordInfo> {
+    const record = this.records.get(key)
+    if (record === undefined) return { configured: false, writable: this.writable() }
+    return { configured: true, kind: record.kind, writable: this.writable() }
+  }
+
+  override async listRecords(): Promise<readonly CredentialRecordEntry[]> {
+    return [...this.records.entries()].map(([key, record]) => ({
+      key: key as CredentialKey,
+      kind: record.kind,
+    }))
+  }
+
+  override async modifyRecord(
+    key: CredentialKey,
+    mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+  ): Promise<CredentialRecord | undefined> {
+    if (this.isHttp()) throw new Error(`credentials-pg: HTTP resolve is read-only; cannot modify record "${key}"`)
+    if (this.isClosed()) throw new Error(`credentials-pg is disposed: cannot modify record "${key}"`)
+    const current = this.records.get(key)
+    const next = await mutate(current)
+    if (next === undefined) return current
+    this.records.set(key, next)
+    this.notifyRecordUpdated(key)
+    return next
+  }
+
+  override async deleteRecord(key: CredentialKey): Promise<void> {
+    if (this.isHttp()) throw new Error(`credentials-pg: HTTP resolve is read-only; cannot delete record "${key}"`)
+    if (this.isClosed()) throw new Error(`credentials-pg is disposed: cannot delete record "${key}"`)
+    if (this.records.delete(key)) this.notifyRecordUpdated(key)
   }
 
   private assertWritable(verb: 'set' | 'unset', ref: CredentialRef): void {

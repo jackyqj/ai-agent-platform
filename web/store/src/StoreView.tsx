@@ -221,6 +221,7 @@ function AgentCard({ a, index, state, act }: { a: Agent; index: number; state: A
           <Badge tone={a.approvalLevel === 'none' ? 'b-none' : 'b-self'}>
             {a.approvalLevel === 'none' ? '无需审批' : '需要审批'}
           </Badge>
+          {(a.skillUpdates ?? []).length > 0 ? <Badge tone="b-warn">可更新</Badge> : null}
         </div>
       </header>
       <p className="desc">{a.description}</p>

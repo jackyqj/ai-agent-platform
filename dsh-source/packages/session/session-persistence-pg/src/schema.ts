@@ -1,17 +1,17 @@
 /**
  * Schema + load-time helpers for the PostgreSQL session-persistence backend:
  * a dedicated `dsh_sessions` schema with `sessions` metadata and a 1:1 `events`
- * row per {@link SessionEvent}, mirroring the SQLite backend's crash-tail-on-load
- * semantics (the `scanRows` cut).
+ * row per {@link SessionEvent}.
  *
- * Ported from dsh-session-persistence-sqlite (platform-owned, 08 工单).
+ * Platform-owned, 08 工单. Schema v2 matches the SessionHandle / v2 header
+ * (isSeeded + inherited_event_count; no seed_length).
  * @module dsh-session-persistence-pg/schema
  */
 
-import type { SessionEvent, SessionId, SessionHeader, SurfaceOp } from '@deepseek-ai/dsh-session'
+import { SessionId as asSessionId, type SessionEvent, type SessionHeader, type SurfaceOp } from '@deepseek-ai/dsh-session'
 
 /** PG schema version gate; bump on a breaking table-layout change. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /** Dedicated schema keeps DSH session data out of the control-plane tables. */
 export const DSH_SCHEMA = 'dsh_sessions'
@@ -22,7 +22,8 @@ export interface SessionRow {
   created_at: number
   cwd: string | null
   parent_session: string | null
-  seed_length: number | null
+  is_seeded: number
+  inherited_event_count: number
   origin: 'subagent' | null
   incarnation: string
   revision: number
@@ -49,17 +50,18 @@ export const DDL = `
   );
 
   CREATE TABLE IF NOT EXISTS ${DSH_SCHEMA}.sessions (
-    id               text PRIMARY KEY,
-    version          integer NOT NULL,
-    created_at       bigint NOT NULL,
-    cwd              text,
-    parent_session   text,
-    seed_length      integer,
-    origin           text,
-    delegation_depth integer,
-    agent_preset     text,
-    incarnation      text NOT NULL,
-    revision         bigint NOT NULL
+    id                     text PRIMARY KEY,
+    version                integer NOT NULL,
+    created_at             bigint NOT NULL,
+    cwd                    text,
+    parent_session         text,
+    is_seeded              integer NOT NULL,
+    inherited_event_count  bigint NOT NULL,
+    origin                 text,
+    delegation_depth       integer,
+    agent_preset           text,
+    incarnation            text NOT NULL,
+    revision               bigint NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS ${DSH_SCHEMA}.events (
@@ -84,12 +86,12 @@ export function rowToMeta(row: SessionRow): SessionHeader {
     throw new Error('stored session createdAt must be a non-negative safe integer')
   }
   return {
-    version: row.version,
-    id: row.id as SessionId,
+    version: row.version as SessionHeader['version'],
+    id: asSessionId(row.id),
     createdAt: row.created_at,
+    isSeeded: row.is_seeded === 1,
     ...row.cwd !== null ? { cwd: row.cwd } : {},
-    ...row.parent_session !== null ? { parentSession: row.parent_session as SessionId } : {},
-    ...row.seed_length !== null ? { seedLength: row.seed_length } : {},
+    ...row.parent_session !== null ? { parentSession: asSessionId(row.parent_session) } : {},
     ...row.origin !== null ? { origin: row.origin } : {},
     ...row.delegation_depth !== null ? { delegationDepth: row.delegation_depth } : {},
     ...row.agent_preset !== null ? { agentPreset: row.agent_preset } : {},
@@ -114,7 +116,7 @@ export function rowToEvent(row: EventRow): SessionEvent {
 
 /**
  * Preserve the contiguous committed prefix; a hole or seq gap after the last
- * `turn/end` marks a tolerated torn tail. Same contract as the SQLite backend.
+ * `turn/end` marks a tolerated torn tail.
  */
 export function scanRows(rows: readonly EventRow[], base = 0): { preserved: SessionEvent[]; tornFrom?: number } {
   interface Parsed { ok: boolean; event?: SessionEvent }
@@ -158,7 +160,8 @@ export function toSessionRow(raw: Record<string, unknown>): SessionRow {
     created_at: Number(raw.created_at),
     cwd: raw.cwd == null ? null : String(raw.cwd),
     parent_session: raw.parent_session == null ? null : String(raw.parent_session),
-    seed_length: raw.seed_length == null ? null : Number(raw.seed_length),
+    is_seeded: Number(raw.is_seeded),
+    inherited_event_count: Number(raw.inherited_event_count),
     origin: raw.origin as SessionRow['origin'],
     incarnation: String(raw.incarnation),
     revision: Number(raw.revision),

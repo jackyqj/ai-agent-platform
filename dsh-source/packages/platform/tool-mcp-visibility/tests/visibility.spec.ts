@@ -27,7 +27,7 @@ async function setup() {
 }
 
 async function mountPlugin(ctx: Context, config: { allowedServers?: string[] }) {
-  const scope = createScope(ctx, 'preset-scope')
+  const scope = createScope(ctx, { preset: 'mcp-visibility' })
   await scope.ctx.plugin(Object.assign(apply, { inject }), config)
   return scope
 }

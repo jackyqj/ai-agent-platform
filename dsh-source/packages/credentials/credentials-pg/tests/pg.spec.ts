@@ -31,7 +31,7 @@ async function boot(config: ConstructorParameters<typeof PgCredentialProvider>[1
 
 function updates(ctx: Context): CredentialRef[] {
   const seen: CredentialRef[] = []
-  ctx.on('credentials/updated', (ref) => { seen.push(ref) })
+  ctx.on('credentials/reference-updated', (ref) => { seen.push(ref) })
   return seen
 }
 

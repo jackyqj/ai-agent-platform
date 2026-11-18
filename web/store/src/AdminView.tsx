@@ -289,6 +289,7 @@ function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpubl
                   {a.name}
                   <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
                   <Badge tone="b-cloud">{a.status}</Badge>
+                  {(a.skillUpdates ?? []).length > 0 ? <Badge tone="b-warn">可更新</Badge> : null}
                 </span>
                 <span className="row" style={{ gap: 6 }}>
                   <span className="row" style={{ gap: 4 }}>

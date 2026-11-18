@@ -120,4 +120,17 @@ describe('store-client', () => {
     expect(calls[1].url).toBe('http://x/api/graphs/invoice-pack/run');
     expect(calls[1].body).toBe(JSON.stringify({ task: '查 INV-1' }));
   });
+
+  it('listSkills and submitSkill hit the skill routes', async () => {
+    const calls = stubFetch(async (url) => {
+      if (url.includes('/submit')) return okJson({ skill: { id: 's' }, notice: 'ok' });
+      return okJson({ skills: [] });
+    });
+    const c = createClient({ baseUrl: 'http://x/api', storage: memStorage() });
+    await c.listSkills();
+    await c.submitSkill('abc');
+    expect(calls[0].url).toBe('http://x/api/skills');
+    expect(calls[1].url).toBe('http://x/api/skills/abc/submit');
+    expect(calls[1].method).toBe('POST');
+  });
 });

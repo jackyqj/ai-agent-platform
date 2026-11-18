@@ -1,11 +1,13 @@
 // Agent 商店目录服务 + 编排（12 工单 + agent-orchestration-design.md）
 // 目录元数据在 PG（agent_presets 表）；编排 spec（AgentSpec）经 AgentComposer 编译为
 // agent.cordis.yml / preset.yml，由 PresetFileStore 写入 preset 根。
-import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional, type OnModuleInit } from '@nestjs/common'
 import { PgStore } from '../store/pg.store.js'
 import { AgentComposer } from './composer.js'
 import { PRESET_FILE_STORE, type PresetFileStore } from './preset-file-store.js'
 import { AuditStore } from '../common/audit.store.js'
+import { SkillsService } from '../skills/skills.service.js'
+import { SkillsError } from '../skills/types.js'
 import type { AgentSpec, CapabilityCatalog, ValidationResult } from './types.js'
 
 export interface AgentPreset {
@@ -17,6 +19,13 @@ export interface AgentPreset {
   approvalLevel: 'none' | 'self' | 'manager'
   status: 'draft' | 'published' | 'deprecated'
   version: number
+  skillUpdates?: SkillUpdateHint[]
+}
+
+export interface SkillUpdateHint {
+  skillId: string
+  boundVersion: string
+  currentVersion: string
 }
 
 export interface SpecView {
@@ -96,6 +105,7 @@ export class AgentsService implements OnModuleInit {
     private readonly composer: AgentComposer,
     private readonly audit: AuditStore,
     @Inject(PRESET_FILE_STORE) private readonly files: PresetFileStore,
+    @Optional() private readonly skills?: SkillsService,
   ) {
     this.seed('assistant', '通用助手', '日常问答、文档起草、信息整理（试点底座）', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
     this.seed('hr-assistant', 'HR 制度助手', '报销/请假/差旅制度问答（知识库检索+出处）', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
@@ -135,7 +145,7 @@ export class AgentsService implements OnModuleInit {
 
   async listFor(role: string, dept: string): Promise<AgentPreset[]> {
     const all = await this.list()
-    return all.filter((p) => {
+    const visible = all.filter((p) => {
       if (p.status !== 'published') return false
       const r = p.visibility.roles
       if (r && r.length && !r.includes(role)) return false
@@ -143,6 +153,7 @@ export class AgentsService implements OnModuleInit {
       if (d && d.length && !d.includes(dept)) return false
       return true
     })
+    return this.decorateSkillUpdates(visible)
   }
 
   async list(): Promise<AgentPreset[]> {
@@ -265,6 +276,9 @@ export class AgentsService implements OnModuleInit {
     const yaml = this.composer.serialize(graph)
     const meta = this.composer.compileMeta(spec)
 
+    // 快照是只读校验：绑定的 skill 必须已发布。失败则不 bump version。
+    const skillFiles = await this.snapshotSkills(spec)
+
     // 先 PG 提交（§10 步骤 4），commit 后再写文件（步骤 5）。
     const nextVersion = await this.persist()
       ? await this.pg.publishAgentPreset({
@@ -277,8 +291,7 @@ export class AgentsService implements OnModuleInit {
     // §10 步骤 4：PG commit 后落审计 compose_publish。fail-soft：审计失败不阻断发布。
     await this.audit.append({ eventType: 'compose_publish', userId: publishedBy, payload: { id, version: nextVersion } })
 
-    // commit 之后原子写文件；写失败靠 P3 漂移告警兜底（PG 已提交但文件未落）。
-    await this.files.write(id, yaml, meta)
+    await this.files.write(id, yaml, meta, skillFiles)
     const agent = await this.get(id)
     if (!agent) throw new Error(`agent ${id} not found`)
     return { agent, version: nextVersion }
@@ -416,6 +429,59 @@ export class AgentsService implements OnModuleInit {
     }
     await this.files.remove(id)
     this.logger.log(`removed agent ${id} by ${byUserId}`)
+  }
+
+  async decorateSkillUpdates(agents: AgentPreset[]): Promise<AgentPreset[]> {
+    if (!this.skills) return agents
+    const out: AgentPreset[] = []
+    for (const a of agents) {
+      const spec = await this.publishedSpec(a.id)
+      const skillUpdates = spec ? await this.skillUpdatesOf(spec) : []
+      out.push(skillUpdates.length ? { ...a, skillUpdates } : a)
+    }
+    return out
+  }
+
+  async pluginPack(id: string): Promise<{ id: string; version: number; files: Record<string, string> } | undefined> {
+    const agent = await this.get(id)
+    if (!agent || agent.status !== 'published') return undefined
+    const files = this.files.readPack ? await this.files.readPack(id) : undefined
+    if (!files) return undefined
+    return { id, version: agent.version, files }
+  }
+
+  private async publishedSpec(id: string): Promise<AgentSpec | undefined> {
+    const revs = await this.listRevisions(id)
+    return revs[0]?.spec
+  }
+
+  private async skillUpdatesOf(spec: AgentSpec): Promise<SkillUpdateHint[]> {
+    if (!this.skills) return []
+    const hints: SkillUpdateHint[] = []
+    for (const b of spec.skills ?? []) {
+      const current = await this.skills.currentPublishedSemver(b.skillId)
+      if (current && current !== b.version) {
+        hints.push({ skillId: b.skillId, boundVersion: b.version, currentVersion: current })
+      }
+    }
+    return hints
+  }
+
+  private async snapshotSkills(spec: AgentSpec): Promise<Record<string, string>> {
+    const bindings = spec.skills ?? []
+    if (bindings.length === 0) return {}
+    if (!this.skills) throw new Error('SkillsService 未装配，无法快照 skill')
+    const files: Record<string, string> = {}
+    for (const b of bindings) {
+      try {
+        const snap = await this.skills.snapshotPublished(b.skillId, b.version)
+        files[snap.slug] = snap.markdown
+      } catch (e) {
+        if (e instanceof SkillsError) throw new Error(`绑定 skill ${b.skillId}@${b.version} 失败：${e.message}`)
+        throw e
+      }
+    }
+    return files
   }
 
   private normalize(r: Record<string, unknown>): AgentPreset {

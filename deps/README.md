@@ -1,6 +1,6 @@
 # DSH 源码 vendor（deps）
 
-`dsh-source/` 是 **DeepSeek Harness 上游源码的 vendor 副本**，当前对齐 `0.1.0-rc.8`（2026-08-21 从 tag `dsh-v0.1.0-rc.8` 覆盖；指针见 `dsh-source/VENDOR.md`）。
+`dsh-source/` 是 **DeepSeek Harness 上游源码的 vendor 副本**，当前对齐 `0.1.3-alpha.1`（2026-09-05 从 tag `dsh-v0.1.3-alpha.1` 覆盖；指针见 `dsh-source/VENDOR.md`）。
 
 ## 为什么 vendor 进本仓库
 
@@ -15,7 +15,7 @@
 
 ## 上游与升级
 
-- 上游：https://github.com/deepseek-ai/deepseek-harness（当前 vendor 对应 `0.1.0-rc.8` / `141eb6fe`，指针见 `dsh-source/VENDOR.md`）
+- 上游：https://github.com/deepseek-ai/deepseek-harness（当前 vendor 对应 `0.1.3-alpha.1` / `d347e703`，指针见 `dsh-source/VENDOR.md`）
 - 平台改动（相对上游）：`packages/platform/task-worker/`、`packages/session/session-persistence-pg/`、
   `packages/credentials/credentials-pg/`、`tsconfig.host.json`（pg / credentials-pg 包引用）、`pnpm-workspace.yaml`（`allowBuilds.msgpackr-extract: false`）、`tsdown.config.ts`（排除 `packages/platform`）
 - **升级流程**：拉取上游新 commit → 覆盖 `dsh-source/`（保留平台组件与本地改动）→ 全量 build/test →

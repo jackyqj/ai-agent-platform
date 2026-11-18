@@ -39,6 +39,14 @@ export interface AgentSpec {
   persona: string
   /** catalog.mcpServers[].serverName 的子集；空 = 不暴露任何 MCP 工具 */
   mcp: string[]
+  /** 钉死的已发布 skill 版本；缺省或空 = 不挂 skill-filesystem */
+  skills?: AgentSkillBinding[]
+}
+
+export interface AgentSkillBinding {
+  skillId: string
+  /** 简化 semver，禁止 `"latest"` */
+  version: string
 }
 
 // ── 编译产物（IR）───────────────────────────────────────────────

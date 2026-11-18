@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { type Actions } from './useApp';
 import { Badge, Empty } from './ui';
 import { fmtTs } from './util';
-import type { AppState, CapabilityCatalog, ComposeState } from './types';
+import type { AppState, CapabilityCatalog, ComposeState, SkillItem } from './types';
 
 // 三栏编排编辑器（agent-orchestration-design.md §9）：
 // 左栏能力目录（只读）、中栏编排表单、右栏 YAML 只读预览 + 校验错误。
@@ -45,7 +45,7 @@ export default function AgentComposeView({ state, act }: { state: AppState; act:
 
         <section className="card">
           <h2 className="plain-head">编排表单</h2>
-          <SpecForm spec={spec} act={act} cat={cat} />
+          <SpecForm spec={spec} act={act} cat={cat} publishedSkills={state.skills} />
         </section>
 
         {showPreview ? (
@@ -97,7 +97,7 @@ function CapabilityCatalogPane({ cat }: { cat: ComposeState['catalog'] }) {
 const ROLES = ['employee', 'developer', 'admin'];
 const APPROVAL = ['none', 'self', 'manager'] as const;
 
-function SpecForm({ spec, act, cat }: { spec: NonNullable<ComposeState['spec']>; act: Actions; cat: ComposeState['catalog'] }) {
+function SpecForm({ spec, act, cat, publishedSkills }: { spec: NonNullable<ComposeState['spec']>; act: Actions; cat: ComposeState['catalog']; publishedSkills: SkillItem[] }) {
   // 当前 modelRoute 在目录中的下标；不在目录（旧值）时回退 ''（显示占位）。
   const indexOfModel = (models: CapabilityCatalog['models'], mr: { provider: string; model: string }) => {
     const i = models.findIndex((m) => m.provider === mr.provider && m.model === mr.model)
@@ -154,6 +154,8 @@ function SpecForm({ spec, act, cat }: { spec: NonNullable<ComposeState['spec']>;
         ))}
       </div>
 
+      <SkillPicker spec={spec} act={act} catalog={publishedSkills} />
+
       <label>审批级别</label>
       <select value={spec.approvalLevel} onChange={(e) => act.editComposeSpec({ approvalLevel: e.target.value as typeof APPROVAL[number] })}>
         {APPROVAL.map((a) => <option key={a} value={a}>{a}</option>)}
@@ -169,6 +171,65 @@ function SpecForm({ spec, act, cat }: { spec: NonNullable<ComposeState['spec']>;
         ))}
       </div>
     </div>
+  );
+}
+
+function SkillPicker({ spec, act, catalog }: { spec: NonNullable<ComposeState['spec']>; act: Actions; catalog: SkillItem[] }) {
+  const [q, setQ] = useState('');
+  const [tag, setTag] = useState('');
+  const bound = spec.skills ?? [];
+  const published = catalog.filter((s) => s.status === 'published');
+  const needle = q.trim().toLowerCase();
+  const tagNeedle = tag.trim().toLowerCase();
+  const shown = published.filter((s) => {
+    const text = (s.title + ' ' + s.slug + ' ' + s.description).toLowerCase();
+    if (needle && !text.includes(needle)) return false;
+    if (tagNeedle && !(s.tags ?? []).some((t) => t.toLowerCase().includes(tagNeedle))) return false;
+    return true;
+  });
+  const pin = (skillId: string, version: string) => {
+    const next = bound.filter((b) => b.skillId !== skillId).concat(version ? [{ skillId, version }] : []);
+    act.editComposeSpec({ skills: next });
+  };
+  return (
+    <>
+      <label>技能（保存时钉死 version，无 latest 别名）</label>
+      <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+        <input placeholder="搜索标题/slug" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder="tag 过滤" value={tag} onChange={(e) => setTag(e.target.value)} />
+      </div>
+      {shown.length === 0 ? <p className="hint">没有已发布 skill</p> : shown.map((s) => {
+        const cur = bound.find((b) => b.skillId === s.id);
+        const latest = s.publishedVersion;
+        const versions = s.publishedVersions?.length ? s.publishedVersions : (latest ? [latest] : []);
+        return (
+          <div key={s.id} className="row" style={{ gap: 8, padding: '4px 0' }}>
+            <span>{s.title} <span className="mono hint">{s.slug}{latest ? ' v' + latest : ''}</span></span>
+            <select
+              aria-label={'版本 ' + s.slug}
+              value={cur?.version ?? ''}
+              onChange={(e) => pin(s.id, e.target.value)}
+            >
+              <option value="">未绑定</option>
+              {versions.map((v) => (
+                <option key={v} value={v}>{v}{v === latest ? '（最新）' : ''}</option>
+              ))}
+            </select>
+            {cur ? (
+              <>
+                <span className="mono">钉死 {cur.version}</span>
+                {latest && latest !== cur.version ? (
+                  <button type="button" className="ghost small" onClick={() => pin(s.id, latest)}>更新到 {latest}</button>
+                ) : null}
+                <button type="button" className="ghost small" onClick={() => pin(s.id, '')}>移除</button>
+              </>
+            ) : (
+              <button type="button" className="ghost small" disabled={!latest} onClick={() => latest && pin(s.id, latest)}>最新（钉死）</button>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 

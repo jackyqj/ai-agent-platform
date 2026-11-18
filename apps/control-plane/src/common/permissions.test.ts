@@ -11,6 +11,18 @@ test('employee cannot manage users or instances; admin can', () => {
   assert.equal(can('developer', 'audit.view'), false)
 })
 
+test('skill.create is for every login role; review is developer+admin; manage is admin', () => {
+  assert.equal(can('employee', 'skill.create'), true)
+  assert.equal(can('developer', 'skill.create'), true)
+  assert.equal(can('admin', 'skill.create'), true)
+  assert.equal(can('employee', 'skill.review'), false)
+  assert.equal(can('developer', 'skill.review'), true)
+  assert.equal(can('admin', 'skill.review'), true)
+  assert.equal(can('employee', 'skill.manage'), false)
+  assert.equal(can('developer', 'skill.manage'), false)
+  assert.equal(can('admin', 'skill.manage'), true)
+})
+
 test('role maps to DSH permission preset', () => {
   assert.equal(ROLE_DSH_PRESET.employee, 'workspace-write')
   assert.equal(ROLE_DSH_PRESET.developer, 'danger-full-access')

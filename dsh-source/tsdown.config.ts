@@ -16,7 +16,7 @@ function isBuildFaceClient(value: unknown): boolean {
 export default defineConfig(({ env }) => {
   const client = isBuildFaceClient(env?.DSH_BUILD_FACE)
   return {
-    // packages/platform/* is platform-owned (not a DSH bundle target).
+    // packages/platform/* is platform-owned (Worker is tsx, not a DSH bundle target).
     workspace: ['vendor/*', 'packages/!(platform)/*', 'apps/cli'],
     entry: client ? '' : ['lib/types/{index,invariant,startup}.js'],
     outDir: 'lib',

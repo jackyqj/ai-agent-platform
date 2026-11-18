@@ -7,6 +7,10 @@ import { AgentComposer } from './composer.js'
 import { MemoryPresetFileStore } from './preset-file-store.js'
 import { AgentsService, SpecValidationError, TemplateHasNoSpecError } from './agents.service.js'
 import type { AgentSpec } from './types.js'
+import { RolesService } from '../common/roles.service.js'
+import { UsersService } from '../users/users.service.js'
+import { NotificationsService } from '../skills/notifications.service.js'
+import { SkillsService } from '../skills/skills.service.js'
 
 // P0/P1 单测走 memory 回退：PgStore(undefined)（pool=null）+ MemoryPresetFileStore（不碰磁盘）。
 // AuditStore 也用 PgStore(undefined)（内存审计路径），可断言 compose_publish 事件。
@@ -201,4 +205,48 @@ test('removeAgent: 删目录行 + 修订 + 文件（内存回退）', async () =
   assert.equal(await svc.get('tmp-agent'), undefined, '目录行删除')
   assert.equal(files.get('tmp-agent'), undefined, '文件删除')
   assert.deepEqual(await svc.listRevisions('tmp-agent'), [], '修订删除')
+})
+
+test('publishSpec: 绑定 skill 时快照 SKILL.md 并在列表上标可更新', async () => {
+  const pg = new PgStore(undefined)
+  const roles = new RolesService(pg)
+  const skills = new SkillsService(pg, new AuditStore(pg), new UsersService(pg, roles), roles, new NotificationsService(pg))
+  const files = new MemoryPresetFileStore()
+  const svc = new AgentsService(pg, new AgentComposer(DEFAULT_CATALOG), new AuditStore(pg), files, skills)
+  const employee = { id: 'u-hr-1', role: 'employee', dept: 'HR/行政' }
+  const developer = { id: 'u-dev-1', role: 'developer', dept: '研发部' }
+
+  const created = await skills.create({ slug: 'leave-faq', title: '请假', body: '第一句。' }, employee)
+  await skills.submit(created.id, employee)
+  const pending = (await skills.listVersions(created.id, developer))[0]!
+  await skills.review(created.id, pending.id, 'approve', developer)
+
+  const seed = (await svc.getSpec('assistant')).spec
+  await svc.putSpec('assistant', { ...seed, skills: [{ skillId: created.id, version: '0.1.0' }] }, 'u-admin')
+  await svc.publishSpec('assistant', 0, 'u-admin')
+  const written = files.get('assistant')!
+  assert.ok(written.cordisYaml.includes('skill-filesystem'))
+  assert.ok(written.skillFiles['leave-faq']?.includes('第一句'))
+
+  await skills.addVersion(created.id, { version: '0.2.0', body: '第二句。' }, employee)
+  const v2 = (await skills.listVersions(created.id, developer)).find((v) => v.version === '0.2.0')!
+  await skills.review(created.id, v2.id, 'approve', developer)
+  const listed = await svc.listFor('employee', '业务部')
+  const row = listed.find((a) => a.id === 'assistant')
+  assert.equal(row?.skillUpdates?.[0]?.currentVersion, '0.2.0')
+  const pack = await svc.pluginPack('assistant')
+  assert.ok(pack?.files['skills/leave-faq/SKILL.md']?.includes('第一句'))
+})
+
+test('publishSpec: 绑定不存在的 skill 时不 bump version', async () => {
+  const pg = new PgStore(undefined)
+  const roles = new RolesService(pg)
+  const skills = new SkillsService(pg, new AuditStore(pg), new UsersService(pg, roles), roles, new NotificationsService(pg))
+  const svc = new AgentsService(pg, new AgentComposer(DEFAULT_CATALOG), new AuditStore(pg), new MemoryPresetFileStore(), skills)
+  const before = await svc.get('assistant')
+  const seed = (await svc.getSpec('assistant')).spec
+  await svc.putSpec('assistant', { ...seed, skills: [{ skillId: 'missing-skill', version: '0.1.0' }] }, 'u-admin')
+  await assert.rejects(() => svc.publishSpec('assistant', 0, 'u-admin'), /绑定 skill missing-skill/)
+  const after = await svc.get('assistant')
+  assert.equal(after?.version, before?.version ?? 0)
 })

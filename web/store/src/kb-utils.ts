@@ -8,6 +8,16 @@ export function canKbManage(me: Me | null): boolean {
   return me.role === 'admin' || (me.permissions ?? []).includes('kb.manage');
 }
 
+export function canSkillReview(me: Me | null): boolean {
+  if (!me) return false;
+  return me.role === 'developer' || me.role === 'admin' || (me.permissions ?? []).includes('skill.review');
+}
+
+export function canSkillManage(me: Me | null): boolean {
+  if (!me) return false;
+  return me.role === 'admin' || (me.permissions ?? []).includes('skill.manage');
+}
+
 export function isFullAdmin(me: Me | null): boolean {
   return me?.role === 'admin';
 }

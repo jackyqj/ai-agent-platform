@@ -1,0 +1,13 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@bienen/dsh-plugin-marketplace':
+        specifier: link:/Users/jac/sw_dir/ai-agent-platform/packages/dsh-plugin-marketplace
+        version: link:../../../packages/dsh-plugin-marketplace

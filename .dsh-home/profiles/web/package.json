@@ -1,12 +1,15 @@
 {
   "name": "dsh-profile-web",
   "private": true,
-  "dependencies": {},
+  "dependencies": {
+    "@bienen/dsh-plugin-marketplace": "link:/Users/jac/sw_dir/ai-agent-platform/packages/dsh-plugin-marketplace"
+  },
   "dsh": {
     "profile": {
       "bundles": [
         "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app"
+        "@deepseek-ai/dsh-web-app",
+        "@bienen/dsh-plugin-marketplace"
       ]
     }
   }

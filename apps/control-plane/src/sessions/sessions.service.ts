@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { AuditStore } from '../common/audit.store.js'
 import { PgStore } from '../store/pg.store.js'
 import { InstancesService } from '../instances/instances.service.js'
-import { webInstanceEnv } from './web-instance-env.js'
 
 export interface Session {
   id: string
@@ -22,6 +21,8 @@ export type AdminSessionView = Omit<Session, 'routingSecret'>
 /**
  * 会话路由（enterprise-shell §3.3）：用户 ↔ 会话 ↔ 实例映射 + routing_secret
  * 持久化（08）：PG sessions 表为主存储（跨实例/重启可恢复）；PG 不可用时回退内存。
+ * 逻辑会话（D22）：员工 `POST /sessions` 只建 `type='rpc'` 逻辑行（无 instanceId），
+ * 任务由 Worker 复用该 `sessionId` 跨轮执行；DSH Web 实例降为远期「工作室」。
  */
 @Injectable()
 export class SessionsService {
@@ -38,17 +39,12 @@ export class SessionsService {
   }
 
   async create(userId: string, agentPresetId = 'assistant', permissionMode = 'workspace-write'): Promise<Session> {
-    // 懒启动实例（02 profile 镜像的注入参数；生产 env 来自密钥服务/配置中心）
-    const instance = await this.instances.getOrCreateWebInstance({
-      userId,
-      env: webInstanceEnv(permissionMode),
-    })
+    // 逻辑会话（D22）：员工对话走 JSON-RPC 任务池，不启动 Web 实例、不占 maxConcurrentInstances
     const session: Session = {
       id: randomUUID(),
       userId,
       agentPresetId,
-      type: 'web',
-      instanceId: instance.id,
+      type: 'rpc',
       routingSecret: randomUUID(),
       status: 'active',
       createdAt: new Date().toISOString(),

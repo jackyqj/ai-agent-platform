@@ -144,11 +144,13 @@ graph TB
     S1 & H1 --> VAULT
 ```
 
+> **D22（2026-08-27）**：员工产品路径改走 JSON-RPC 运行时池；`S1`/每用户 Web 实例降为远期「工作室」（本轮不实现入口），仅 `H1` 为当前员工会话宿主。
+
 ### 3.1 各层职责
 
 - **接入层**：员工使用入口。Web 门户是主界面（对话、Agent 目录、任务中心、用量看板）；IM 机器人把入口延伸到日常工具；开放 API 供内部系统触发 Agent。
 - **边缘**：反向代理终止 TLS 并做 SSO 认证（**钉钉 OIDC 首发**，企微/飞书为配置项；组织架构同步），把用户身份注入请求头；控制面 API 负责实例编排、会话路由、配额校验、审计落库。
-- **执行层**：DSH 运行时池。交互式会话跑在每用户 DSH Web 实例（懒启动 + 空闲回收）；自动化任务（IM 触发、定时、API 触发）跑在 **JSON-RPC 运行时池**——基于官方 TS SDK（`@deepseek-ai/dsh-sdk-client`）的常驻运行时进程，控制面（Node/TS + NestJS）通过 JSON-RPC 驱动，会话按 `session_id` 复用，`session_root` 指向共享存储。
+- **执行层**：员工交互（Web 商店 / 钉钉 / API）与自动化任务都跑在 **JSON-RPC 运行时池**——官方 TS SDK（`@deepseek-ai/dsh-sdk-client`）驱动的常驻进程，控制面调度，会话按 `session_id` 复用，`session_root` 指向共享存储（**D22**）。每用户 DSH Web 实例（懒启动 + 空闲回收）降为远期「工作室」，本轮不实现入口。
 - **能力层**：模型网关统一暴露一个 OpenAI 兼容端点（背后是私有 vLLM + 云端 API 的混合路由）；MCP Server 农场承载 RAG、数据库、内部 API——每个都是标准 MCP 协议，通过 `dsh-mcp-client` 按 Agent 挂载。
 - **数据层**：PostgreSQL 存会话事件与平台元数据；对象存储存附件与文档；向量库存知识库切片；OTel 承载审计与监控；KMS 集中管密钥。
 
@@ -160,9 +162,9 @@ graph TB
 
 ## 4. 关键技术决策（ADR）
 
-### ADR-1 多用户模型：每用户实例 + JSON-RPC 运行时池，不做多租户内核改造
+### ADR-1 多用户模型：JSON-RPC 运行时池（员工路径），不做多租户内核改造
 
-- **决策**：交互式会话采用「懒启动的每用户 DSH Web 实例」（容器化，空闲回收，同时在线控制在资源预算内）；自动化任务采用 **JSON-RPC 运行时池**——官方 TS SDK（`@deepseek-ai/dsh-sdk-client`）驱动的常驻运行时进程，控制面（Node/TS + NestJS）统一调度，每个用户会话有独立 `session_root` 工作区与 `session_id`。
+- **决策**（**D22（2026-08-27）** 修正）：员工产品路径走 **JSON-RPC 运行时池**——官方 TS SDK（`@deepseek-ai/dsh-sdk-client`）驱动的常驻进程，控制面统一调度，`POST /sessions` 只建逻辑会话（`type=rpc`），每个会话有独立 `session_root` 与 `session_id`。每用户 DSH Web 实例（容器化，空闲回收）降为远期「工作室」，本轮不实现入口。不做多租户内核改造。
 - **理由**：DSH 是单用户产品架构（单 Host/单客户端/本地盘），多租户改造等于 fork 上游、长期背负合并成本；DSH 处于 0.1.0-rc 高频迭代期，保持跟随上游收益大。每用户实例天然隔离、可按用户配资源、故障爆炸半径小。SDK 是官方支持的嵌入式通道（JSON-RPC over stdio、会话复用、持久 shell、自定义 cordis 组合），比裸跑 CLI 进程更可控、更省资源。
 - **代价**：控制面实例编排层需自建（启动/路由/回收/健康检查）。
 - **可回退**：若实例资源成本过高，可将同一用户的多实例合并为一个常驻会话（headless 模式），损失部分 UI 能力。
@@ -217,7 +219,7 @@ graph TB
 
 **目标**：从单机走向服务化，50 人可用。
 
-- [ ] 控制面骨架（Node/TS + NestJS，容器化 DSH Web 实例懒启动 + 空闲回收，详见 enterprise-shell §3.2–3.4）
+- [ ] 控制面骨架（Node/TS + NestJS；员工路径逻辑 RPC 会话 + JSON-RPC 运行时池，详见 D22；Web 实例编排留作远期工作室，enterprise-shell §3.2–3.4）
 - [ ] 反代 + TLS + SSO（钉钉 OIDC 首发，企微/飞书为配置项；平台 JWT 签发）
 - [ ] 共享 `SessionPersistence`（PostgreSQL）与附件对象存储
 - [ ] 集中凭据 Provider（KMS 对接）
@@ -303,5 +305,5 @@ JD 中「参与公司大模型应用平台的搭建与迭代（RAG 知识库问�
 - **企业外壳设计**：`.scratch/ai-agent-platform/enterprise-shell.md`（控制面：§3 模块、§4 数据模型、§5 选型、§7 接口契约、§8 开发顺序）
 - **集中评审**：`.scratch/ai-agent-platform/fog-review.md`（Fog 剩余问题的评审材料）
 - **调研报告**：`.scratch/ai-agent-platform/research-report.md`（131 行完整评估，全部结论附包名/路径/README 引文证据）
-- **DSH 源码克隆**：`dsh-source/`（vendor 源码，HEAD = 0.1.0-rc.8 / `141eb6fe`，2026-08-21 对齐 tag `dsh-v0.1.0-rc.8`）
+- **DSH 源码克隆**：`dsh-source/`（vendor 源码，HEAD = 0.1.3-alpha.1 / `d347e703`，2026-09-05 对齐 tag `dsh-v0.1.3-alpha.1`）
 - 文档基于对 DSH v0.1.0-rc.6（本地安装）与 rc.5（仓库 HEAD）的勘察编写；随 DSH 上游演进需定期复核。技术细节以 DSH README 与源码为准。

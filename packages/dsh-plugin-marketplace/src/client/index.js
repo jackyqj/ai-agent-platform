@@ -6,29 +6,32 @@ const CSS = `
 .bienen-trigger{display:inline-flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:0 -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;cursor:pointer;overflow:hidden}
 .bienen-trigger:hover,.bienen-trigger[data-active]{background:var(--dsw-alias-interactive-bg-hover)}
 .bienen-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bienen-count{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-primary, #fff);font-size:11px;line-height:18px;text-align:center}
-.bienen-panel{position:fixed;z-index:40;width:min(360px,calc(100vw - 24px));max-height:min(480px,70vh);display:flex;flex-direction:column;border-radius:12px;background:var(--dsw-alias-bg-primary, #1b1b1b);color:var(--dsw-alias-label-primary);box-shadow:0 8px 32px rgba(0,0,0,.35);overflow:hidden}
-.bienen-head,.bienen-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-secondary, #333)}
-.bienen-foot{border-bottom:none;border-top:1px solid var(--dsw-alias-border-secondary, #333);margin-top:auto}
-.bienen-body{overflow:auto;padding:8px 12px 12px;font-size:13px}
-.bienen-error{margin:0 0 8px;color:var(--dsw-alias-label-danger, #e24)}
-.bienen-group{margin:12px 0 6px;font-size:12px;opacity:.7}
-.bienen-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-secondary, #333)}
-.bienen-title{flex:1;min-width:0}
-.bienen-ver{opacity:.65;font-size:12px}
-.bienen-chip{font-size:11px;opacity:.8}
-.bienen-btn{border:none;border-radius:8px;padding:4px 8px;font:inherit;font-size:12px;cursor:pointer;background:var(--dsw-alias-interactive-bg-hover);color:inherit}
+.bienen-count{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-label-primary-foreground,#fff);font-size:11px;line-height:18px;text-align:center}
+.bienen-panel{position:fixed;z-index:40;width:min(360px,calc(100vw - 24px));max-height:min(480px,70vh);display:flex;flex-direction:column;border-radius:12px;background:var(--dsw-specific-menu,#fff);color:var(--dsw-alias-label-primary,#0f1115);box-shadow:var(--dsw-elevation-prominent,0 8px 32px rgba(0,0,0,.18));overflow:hidden}
+.bienen-head,.bienen-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}
+.bienen-head{color:var(--dsw-alias-label-primary,#0f1115);font-size:14px;font-weight:500}
+.bienen-foot{border-bottom:none;border-top:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));margin-top:auto}
+.bienen-body{overflow:auto;padding:8px 12px 12px;font-size:13px;color:var(--dsw-alias-label-primary,#0f1115)}
+.bienen-error{margin:0 0 8px;color:var(--dsw-alias-state-error-primary,#c00)}
+.bienen-group{margin:12px 0 6px;font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--dsw-alias-label-caption,#6b7280)}
+.bienen-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}
+.bienen-title{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#0f1115)}
+.bienen-ver{font-size:12px;color:var(--dsw-alias-label-tertiary,#6b7280)}
+.bienen-chip{font-size:11px;color:var(--dsw-alias-label-secondary,#4b5563)}
+.bienen-btn{border:none;border-radius:8px;padding:4px 8px;font:inherit;font-size:12px;cursor:pointer;background:var(--dsw-alias-interactive-bg-hover-solid,#eee);color:var(--dsw-alias-label-primary,#0f1115)}
 .bienen-btn:disabled{opacity:.5;cursor:default}
-.bienen-pre{white-space:pre-wrap;font-size:12px;user-select:all}
+.bienen-pre{white-space:pre-wrap;font-size:12px;user-select:all;color:var(--dsw-alias-label-primary,#0f1115)}
 `
 
 function ensureCss() {
   if (typeof document === 'undefined') return
-  if (document.querySelector('style[data-plugin-css="bienen-market"]')) return
-  const tag = document.createElement('style')
-  tag.dataset.pluginCss = 'bienen-market'
+  let tag = document.querySelector('style[data-plugin-css="bienen-market"]')
+  if (tag === null) {
+    tag = document.createElement('style')
+    tag.dataset.pluginCss = 'bienen-market'
+    document.head.appendChild(tag)
+  }
   tag.textContent = CSS
-  document.head.appendChild(tag)
 }
 
 async function readStatus() {

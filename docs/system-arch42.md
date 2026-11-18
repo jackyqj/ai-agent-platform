@@ -93,27 +93,27 @@
 
 ```mermaid
 flowchart LR
-  subgraph 人
-    E[员工浏览器]
-    A[管理员]
-    D[开发者]
+  subgraph people["人"]
+    E["员工浏览器"]
+    A["管理员"]
+    D["开发者"]
   end
-  subgraph 企业入口
-    DT[钉钉 SSO / IM 机器人]
-    SYS[内部系统]
+  subgraph entry["企业入口"]
+    DT["钉钉 SSO / IM 机器人"]
+    SYS["内部系统"]
   end
-  P[AI Agent 平台]
-  subgraph 外部能力
-    LLM[云端模型 API<br/>DeepSeek / 通义]
-    VLLM[私有 vLLM / Qwen]
-    DINGAPI[钉钉开放平台]
+  P["AI Agent 平台"]
+  subgraph ext["外部能力"]
+    LLM["云端模型 API<br>DeepSeek / 通义"]
+    VLLM["私有 vLLM / Qwen"]
+    DINGAPI["钉钉开放平台"]
   end
 
   E --> P
   A --> P
   D --> P
   DT --> P
-  SYS -->|API Key| P
+  SYS -->|"API Key"| P
   P --> LLM
   P --> VLLM
   P --> DINGAPI
@@ -125,32 +125,32 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  subgraph 接入
-    STORE[web/store<br/>Vite + React]
-    IM[钉钉 Stream]
-    APIK[X-API-Key]
+  subgraph access["接入"]
+    STORE["web/store<br>Vite + React"]
+    IM["钉钉 Stream"]
+    APIK["X-API-Key"]
   end
 
-  CP[控制面 NestJS<br/>127.0.0.1:4000]
+  CP["控制面 NestJS<br>127.0.0.1:4000"]
 
-  subgraph 执行
-    W[task-worker<br/>BullMQ 消费者]
-    RT[DSH JSON-RPC 运行时<br/>stdio]
-    WEBINST[DSH Web 实例容器<br/>远期工作室]
+  subgraph exec["执行"]
+    W["task-worker<br>BullMQ 消费者"]
+    RT["DSH JSON-RPC 运行时<br>stdio"]
+    WEBINST["DSH Web 实例容器<br>远期工作室"]
   end
 
-  subgraph 能力
-    GW[LiteLLM :4001]
-    KB[mcp-kb stdio]
-    DBMCP[mcp-db stdio]
+  subgraph caps["能力"]
+    GW["LiteLLM :4001"]
+    KB["mcp-kb stdio"]
+    DBMCP["mcp-db stdio"]
   end
 
-  subgraph 数据
-    PG[(PostgreSQL)]
-    REDIS[(Redis)]
+  subgraph data["数据"]
+    PG[("PostgreSQL")]
+    REDIS[("Redis")]
   end
 
-  STORE -->|JWT /api| CP
+  STORE -->|"JWT /api"| CP
   IM --> CP
   APIK --> CP
   CP --> REDIS
@@ -162,9 +162,9 @@ flowchart TB
   RT --> DBMCP
   RT --> PG
   W --> PG
-  CP -.->|本轮员工路径不走| WEBINST
-  GW --> CLOUD[DeepSeek / DashScope]
-  GW -.->|可选 GPU| VLLM[vLLM :8000]
+  CP -.->|"本轮员工路径不走"| WEBINST
+  GW --> CLOUD["DeepSeek / DashScope"]
+  GW -.->|"可选 GPU"| VLLM["vLLM :8000"]
 ```
 
 **范围以内**：`apps/control-plane`、`web/store`、`services/mcp-*`、`configs/`、`dsh-source/packages/platform/task-worker`、平台自有缝 `session-persistence-pg` / `credentials-pg`、公司 preset 与 profile。
@@ -215,43 +215,43 @@ ai-agent-platform/
 
 ```mermaid
 flowchart TB
-  subgraph L1[接入层]
-    STORE[商店 UI]
-    ADMIN[管理后台 同应用]
-    IM[钉钉 Stream]
+  subgraph L1["接入层"]
+    STORE["商店 UI"]
+    ADMIN["管理后台 同应用"]
+    IM["钉钉 Stream"]
   end
 
-  subgraph L2[控制面]
-    AUTH[auth]
-    SESS[sessions]
-    TASK[tasks]
-    AG[agents / catalog / skills]
-    APPR[approvals]
-    QUOTA[quota]
-    USER[users / roles]
-    SEC[secrets]
-    INST[instances]
-    PROXY[proxy]
-    SCH[scheduled]
-    KBAPI[kb]
-    AUD[audit / stats]
+  subgraph L2["控制面"]
+    AUTH["auth"]
+    SESS["sessions"]
+    TASK["tasks"]
+    AG["agents / catalog / skills"]
+    APPR["approvals"]
+    QUOTA["quota"]
+    USER["users / roles"]
+    SEC["secrets"]
+    INST["instances"]
+    PROXY["proxy"]
+    SCH["scheduled"]
+    KBAPI["kb"]
+    AUD["audit / stats"]
   end
 
-  subgraph L3[执行层]
-    Q[Redis BullMQ agent-tasks]
-    WK[task-worker]
-    DSH[DSH runtime<br/>jsonrpc-demo bin + worker.cordis.yml]
+  subgraph L3["执行层"]
+    Q["Redis BullMQ agent-tasks"]
+    WK["task-worker"]
+    DSH["DSH runtime<br>jsonrpc-demo bin + worker.cordis.yml"]
   end
 
-  subgraph L4[能力层]
-    GW[LiteLLM]
-    MCPKB[company-mcp-kb]
-    MCPDB[company-mcp-db]
+  subgraph L4["能力层"]
+    GW["LiteLLM"]
+    MCPKB["company-mcp-kb"]
+    MCPDB["company-mcp-db"]
   end
 
-  subgraph L5[数据层]
-    PG[(control_plane)]
-    VAULT[credential_secrets]
+  subgraph L5["数据层"]
+    PG[("control_plane")]
+    VAULT["credential_secrets"]
   end
 
   STORE --> AUTH
@@ -273,7 +273,7 @@ flowchart TB
   TASK --> PG
   SEC --> VAULT
   DSH --> VAULT
-  INST -.->|员工路径不调用| DSH
+  INST -.->|"员工路径不调用"| DSH
 ```
 
 ### 5.2 控制面模块（Level 2）
@@ -335,14 +335,14 @@ DSH 是 Cordis 插件树。与平台对接时只需记住：
 
 ```mermaid
 flowchart LR
-  SDK[dsh-sdk-client] -->|stdio JSON-RPC| SRV[dsh-sdk-jsonrpc-server]
-  SRV --> LOOP[agent-loop]
-  LOOP --> LLM[ctx.llm]
-  LOOP --> TOOLS[ctx.tools]
-  LOOP --> SESSLOG[ctx.sessions]
-  TOOLS --> MCP[dsh-mcp-client]
-  LLM --> GW[LiteLLM]
-  SESSLOG --> PERSIST[SessionPersistence Provider]
+  SDK["dsh-sdk-client"] -->|"stdio JSON-RPC"| SRV["dsh-sdk-jsonrpc-server"]
+  SRV --> ALOOP["agent-loop"]
+  ALOOP --> LLM["ctx.llm"]
+  ALOOP --> TOOLS["ctx.tools"]
+  ALOOP --> SESSLOG["ctx.sessions"]
+  TOOLS --> MCP["dsh-mcp-client"]
+  LLM --> GW["LiteLLM"]
+  SESSLOG --> PERSIST["SessionPersistence Provider"]
 ```
 
 一次 **step** = 一次模型请求 + 其工具调用；一次 **turn** = 零或多 step。模型可见内容必须能从会话日志重建。
@@ -386,18 +386,18 @@ sequenceDiagram
   participant W as task-worker
   participant DSH as DSH runtime
   participant GW as LiteLLM
-  participant MCP as mcp-kb / mcp-db
+  participant MCP as mcp-kb 或 mcp-db
 
   U->>UI: 登录（dev 或钉钉回调）
   UI->>CP: GET /api/auth/dev/login 或 SSO
   CP-->>UI: JWT
   U->>UI: 选择 Agent，开始对话
-  UI->>CP: POST /api/sessions {agentPresetId}
+  UI->>CP: "POST /api/sessions {agentPresetId}"
   Note over CP: type=rpc，无 instanceId
   CP->>PG: INSERT sessions
   CP-->>UI: sessionId
   U->>UI: 发送问题
-  UI->>CP: POST /api/tasks {task, agentPresetId, sessionId}
+  UI->>CP: "POST /api/tasks {task, sessionId}"
   CP->>CP: 校验会话归属且未关闭
   CP->>CP: quota.checkAndRecord
   CP->>CP: approvals.gateTask
@@ -428,11 +428,11 @@ sequenceDiagram
   participant CP as TasksService
   participant W as worker
 
-  U->>DT: @机器人 提问
+  U->>DT: "@机器人 提问"
   DT->>ST: Stream 回调
   ST->>IM: handleInbound
-  IM->>IM: 去重 msgId / 敏感词 / 关键词→preset
-  IM->>IM: staffId→unionId→users.upsert
+  IM->>IM: 去重 msgId、敏感词、关键词到 preset
+  IM->>IM: staffId 到 unionId 到 users.upsert
   IM->>CP: submit(userId, preset, text)
   IM->>DT: 受理回执
   CP->>W: 队列执行
@@ -448,16 +448,16 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  S[submit] --> V{sessionId?}
-  V -->|有| C{归属且未关闭}
-  C -->|否| E1[session not found / closed]
+  S["submit"] --> V{"有 sessionId?"}
+  V -->|有| C{"归属且未关闭"}
+  C -->|否| E1["session not found / closed"]
   V -->|无| Q
-  C -->|是| Q[quota.checkAndRecord]
-  Q -->|blocked reject| F[tasks=failed 抛配额已用尽]
-  Q -->|warn 或未超| G[approvals.gateTask]
-  G -->|granted| EN[enqueue BullMQ]
-  G -->|pending| WAIT[awaitingApproval 不入队]
-  EN --> AUD[audit task.submitted]
+  C -->|是| Q["quota.checkAndRecord"]
+  Q -->|"blocked reject"| F["tasks failed 抛配额已用尽"]
+  Q -->|"warn 或未超"| G["approvals.gateTask"]
+  G -->|granted| EN["enqueue BullMQ"]
+  G -->|pending| WAIT["awaitingApproval 不入队"]
+  EN --> AUD["audit task.submitted"]
   WAIT --> AUD
 ```
 
@@ -474,22 +474,22 @@ flowchart TD
 ```mermaid
 sequenceDiagram
   participant SDK
-  participant Loop as agent-loop
+  participant AgentLoop as agent-loop
   participant LLM
   participant Tools
 
-  SDK->>Loop: run(task, session_id)
-  Loop->>Loop: turn/start
-  Loop->>Loop: agent/pre-step
-  Loop->>LLM: agent/request → llm/stream
-  LLM-->>Loop: assistant/message
+  SDK->>AgentLoop: run(task, session_id)
+  AgentLoop->>AgentLoop: "turn/start"
+  AgentLoop->>AgentLoop: "agent/pre-step"
+  AgentLoop->>LLM: "agent/request -> llm/stream"
+  LLM-->>AgentLoop: "assistant/message"
   alt 需要工具
-    Loop->>Tools: tool/call
-    Tools->>Tools: pre-execute / execute / post-execute
-    Tools-->>Loop: tool/result
-    Loop->>LLM: 下一 step
+    AgentLoop->>Tools: "tool/call"
+    Tools->>Tools: "pre-execute / execute / post-execute"
+    Tools-->>AgentLoop: "tool/result"
+    AgentLoop->>LLM: 下一 step
   end
-  Loop-->>SDK: turn/end
+  AgentLoop-->>SDK: "turn/end"
 ```
 
 ### 6.5 认证
@@ -502,21 +502,21 @@ sequenceDiagram
   participant DT as 钉钉 OAuth
   participant V as vault
 
-  alt CP_AUTH_MODE=dev
-    U->>CP: GET /api/auth/dev/login?userId=
+  alt CP_AUTH_MODE 为 dev
+    U->>CP: "GET /api/auth/dev/login?userId="
     CP-->>UI: JWT
   else oidc
     U->>CP: GET /api/auth/sso/login
     CP->>V: resolve CP_OIDC_CLIENT_SECRET
     CP-->>U: 302 login.dingtalk.com
-    U->>CP: /api/auth/sso/callback?code&state
+    U->>CP: "GET /api/auth/sso/callback?code&state"
     CP->>CP: 校验 state JWT
-    CP->>DT: userAccessToken + users/me
-    CP->>CP: 映射用户 / 部门角色
+    CP->>DT: "userAccessToken + users/me"
+    CP->>CP: 映射用户与部门角色
     CP-->>UI: JWT
   end
   UI->>CP: Authorization Bearer
-  Note over CP: AuthGuard：验签 → 禁用用户拒绝 → 实时 role/dept
+  Note over CP: AuthGuard 验签、禁用用户拒绝、实时 role/dept
 ```
 
 内部系统：`POST /api/service/trigger`，`ApiKeyGuard` + `scope=task:create`。Key 只存 sha256。
@@ -525,8 +525,8 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> rpcActive: POST /sessions D22
-  rpcActive --> closed: close / 用户禁用
+  [*] --> rpcActive: POST sessions D22
+  rpcActive --> closed: close 或用户禁用
   closed --> [*]
 
   note right of rpcActive
@@ -535,12 +535,12 @@ stateDiagram-v2
   end note
 
   [*] --> spawning: 远期工作室 getOrCreateWebInstance
-  spawning --> ready: /healthz
+  spawning --> ready: healthz
   ready --> busy
   busy --> idle
   idle --> reaping: idleReapAfterMs
   reaping --> dead
-  ready --> dead: stop / 健康失败
+  ready --> dead: stop 或健康失败
 ```
 
 存量 `type=web` 且带 `instanceId` 的行：关闭时仍 `instances.stop`。`/proxy/:sessionId/*` 对 rpc 会话返回 503 `no instance`。
@@ -561,19 +561,19 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TB
-  subgraph 宿主
-    UI[Vite store :5377]
-    CP[control-plane :4000 loopback]
-    WK[tsx worker]
-    KB[mcp-kb 子进程]
-    DBM[mcp-db 子进程]
+  subgraph host["宿主"]
+    UI["Vite store :5377"]
+    CP["control-plane :4000 loopback"]
+    WK["tsx worker"]
+    KB["mcp-kb 子进程"]
+    DBM["mcp-db 子进程"]
   end
 
-  subgraph podman
-    PG[(adaptix-postgres :5432)]
-    REDIS[(adaptix-redis :6379)]
-    LM[litellm :4001→:4000]
-    VLLM[vllm :8000 可选]
+  subgraph pods["podman"]
+    PG[("adaptix-postgres :5432")]
+    REDIS[("adaptix-redis :6379")]
+    LM["litellm :4001 to :4000"]
+    VLLM["vllm :8000 可选"]
   end
 
   UI --> CP
@@ -584,7 +584,7 @@ flowchart TB
   WK --> LM
   WK --> KB
   WK --> DBM
-  LM --> API[api.deepseek.com]
+  LM --> API["api.deepseek.com"]
   LM -.-> VLLM
 ```
 
@@ -633,23 +633,23 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  subgraph 身份
-    JWT[平台 JWT]
-    KEY[API Key hash]
-    SSO[钉钉 OAuth]
+  subgraph ident["身份"]
+    JWT["平台 JWT"]
+    KEY["API Key hash"]
+    SSO["钉钉 OAuth"]
   end
-  subgraph 授权
-    RBAC[权限点 PERMISSIONS]
-    ROLE[employee / developer / admin / 自定义]
-    DSHP[DSH_PERMISSION_MODE]
-    VIS[preset / skill / graph 可见性]
+  subgraph authz["授权"]
+    RBAC["权限点 PERMISSIONS"]
+    ROLE["employee / developer / admin / 自定义"]
+    DSHP["DSH_PERMISSION_MODE"]
+    VIS["preset / skill / graph 可见性"]
   end
-  subgraph 执行约束
-    SAND[sandbox-policy]
-    APPR[任务前置审批]
-    SQL[mcp-db 白名单]
-    IMGaurd[IM 敏感词]
-    QUOTA[配额门]
+  subgraph execLimits["执行约束"]
+    SAND["sandbox-policy"]
+    APPR["任务前置审批"]
+    SQL["mcp-db 白名单"]
+    IMGuard["IM 敏感词"]
+    QUOTA["配额门"]
   end
   JWT --> RBAC
   KEY --> RBAC

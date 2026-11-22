@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The `credentials/` group manages the secret values your configuration refers to by name: store an API key once, reference it from settings or `cordis.yml`, and rotate it without editing any configuration file. It provides the runtime part of the product that stores and looks up secrets (`credentials/`), the default on-machine credential file (`credentials-local/`), and the authorization flow registry (`authorization/`) for credentials that cannot be configured, because getting one means asking a human. A rotated key reaches the very next model request, and a per-run environment override (`DEEPSEEK_API_KEY=… dsh`) always wins over stored values. Secret values never enter configuration files you sync or render — only their names do, and the local file is readable by the same OS user, not by others.
+The `credentials/` group lets configuration name secrets instead of embedding their values. Use `credentials/` to store, look up, and remove credentials, `credentials-local/` for private on-machine storage with environment fallbacks, and `authorization/` when obtaining a credential requires asking a human. Rotated stored values apply to the next model request, and a stored value takes precedence over `DEEPSEEK_API_KEY=… dsh`. Configuration files contain only credential names; local secret values remain readable only by the same OS user.
 
 ## Table of Contents
 
@@ -22,12 +22,12 @@ The `credentials/` group manages the secret values your configuration refers to 
 <a id="packages"></a>
 ## Packages
 
-Three packages provide the credential feature: one stores, looks up, and removes secrets at runtime while configuration only names them; the second is the default on-machine store; the third lets plugins obtain credentials that have to be asked for. Their READMEs cover day-to-day use; the subsystem reference owns the exhaustive contracts.
+Four packages provide the credential feature: the generic credential service, the default on-machine store, the platform-owned PostgreSQL vault, and plugin-owned flows for credentials obtained from a human. Their READMEs cover day-to-day use; the subsystem reference owns the exhaustive contracts.
 
 | Package | Role | ctx key |
 |---|---|---|
 | [`credentials/`](credentials/README.md) | Store, look up, and remove secrets at runtime while configuration only names them | `ctx.credentials` |
-| [`credentials-local/`](credentials-local/README.md) | The default on-machine store: a private YAML file, environment overrides win | registers `ctx.credentials` |
+| [`credentials-local/`](credentials-local/README.md) | The default on-machine store: a private YAML file that outranks environment fallbacks | registers `ctx.credentials` |
 | [`credentials-pg/`](credentials-pg/README.md) | PostgreSQL vault provider (platform-owned, D20) | registers `ctx.credentials` |
 | [`authorization/`](authorization/README.md) | Plugin-owned flows that obtain a credential by asking a human | `ctx.authorization` |
 
@@ -38,7 +38,7 @@ Three packages provide the credential feature: one stores, looks up, and removes
 
 Start with the subsystem reference for the shared vocabulary, then the capability-seam table and the configuration surface of the local store.
 
-- [Credentials subsystem reference](../../docs/subsystems/credentials.md) — `CredentialRef` and `CredentialKey`, per-operation resolution, UI-safe `CredentialInfo`, authorization flows, and the generated cordis surface.
+- [Credentials subsystem reference](../../docs/subsystems/credentials.md) — `CredentialRef` and `CredentialKey`, per-operation resolution, UI-safe `CredentialInfo`, authorization flows, and the generated Cordis surface.
 - [Capability seams](../../docs/capability-seams.md) — the Service Definition / Service Provider / Consumer split this family follows.
 - [Generated configuration catalog](../../docs/config-catalog.md#deepseek-aidsh-credentials-local) — every accepted field of the local store.
 

@@ -2,16 +2,18 @@
 // generated through Session so pagination exercises the same event shapes as
 // persisted conversations, while unique markers identify semantic rows
 // without depending on CSS-module names or virtualizer DOM positions.
+import { brandString } from '@deepseek-ai/dsh-brand'
 import {
-  ToolCallId,
+  type ToolCallId,
   createAssistantMessage,
+  createSystemMessage,
   createToolResultMessage,
   createUserMessage,
 } from '@deepseek-ai/dsh-llm'
 import {
   SESSION_FORMAT_VERSION,
   Session,
-  SessionId,
+  type SessionId,
 } from '@deepseek-ai/dsh-session'
 // Carries the session/title event declaration into this fixture builder.
 import type {} from '@deepseek-ai/dsh-session-title'
@@ -64,11 +66,18 @@ function markerHelpers(prefix: string): ChatScrollMarkers {
   }
 }
 
+function appendSystemPrompt(session: Session, turn: number, step: number): void {
+  session.append('system/message', {
+    turn,
+    step,
+    message: createSystemMessage('Synthetic chat-scroll system prompt.'),
+  }, { surfaceOp: 'append' })
+}
+
 function appendRequestHeader(session: Session, turn: number, step: number): void {
   session.append('request/header', {
     header: {
       config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      system: `Synthetic chat-scroll request for turn ${String(turn)}, step ${String(step)}.`,
     },
     reason: turn === 1 && step === 1 ? 'initial' : 'change',
   })
@@ -106,7 +115,7 @@ function appendToolStep(
 ): void {
   const calls = [1, 2].map((index) => {
     const marker = markers.tool(turn, index)
-    const callId = ToolCallId(`chat-scroll-${suffix(turn)}-${String(index)}`)
+    const callId = brandString<ToolCallId>(`chat-scroll-${suffix(turn)}-${String(index)}`)
     const args = JSON.stringify({
       command: `printf '${marker}\\n'`,
       description: marker,
@@ -182,12 +191,15 @@ function fixtureLog(session: Session): string {
 export function createChatScrollFixture(options: ChatScrollFixtureOptions): ChatScrollFixture {
   const turns = options.turns ?? DEFAULT_TURNS
   const markers = markerHelpers(options.markerPrefix)
-  const session = Session.create(SessionId(`chat-scroll-${options.markerPrefix.toLowerCase()}-template`))
+  const session = Session.create(brandString<SessionId>(`chat-scroll-${options.markerPrefix.toLowerCase()}-template`))
 
   for (let turn = 1; turn <= turns; turn += 1) {
     session.append('turn/start', {
       turn,
     })
+    session.append('step/start', { turn, step: 1 })
+    // Native V3 installs the protected system head before any user surface.
+    if (turn === 1) appendSystemPrompt(session, turn, 1)
     const user = session.append('user/message', createUserMessage({
       content: text(
         `${markers.user(turn)} Review the long-running conversation state for turn ${String(turn)}. `
@@ -203,7 +215,6 @@ export function createChatScrollFixture(options: ChatScrollFixtureOptions): Chat
       })
     }
 
-    session.append('step/start', { turn, step: 1 })
     appendRequestHeader(session, turn, 1)
     if (turn % TOOL_INTERVAL === 0) {
       appendToolStep(session, markers, turn)

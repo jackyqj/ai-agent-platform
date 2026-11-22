@@ -6,12 +6,14 @@ import {
   fixtureContext,
   normalizeSessionSnapshot,
   normalizeSessionSnapshots,
+  REPLAY_CREDENTIAL_ENV,
   type NormalizeContext,
 } from '@deepseek-ai/dsh-session-snapshot'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
-import { createUserMessage, ToolCallId , createMessage } from '@deepseek-ai/dsh-llm'
-import { SessionSeq, SESSION_FORMAT_VERSION, SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { createUserMessage, type ToolCallId, createMessage } from '@deepseek-ai/dsh-llm'
+import { SessionSeq, SESSION_FORMAT_VERSION, type SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { logPath } from '../../../../../../packages/session/session-persistence-jsonl/src/format.ts'
 import { describe, expect, it } from 'vitest'
 
@@ -22,7 +24,7 @@ const sessionExpected = join(fixtureDir, 'session.expected.jsonl')
 const configPath = fileURLToPath(new URL('../semantic-checkpoint-snapshot.patch.yml', import.meta.url))
 const binScript = fileURLToPath(new URL('../../../../../../packages/test-support/loader-smoke/tests/fixtures/headless-driver.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../../../../tsconfig.json', import.meta.url))
-const sessionId = SessionId('semantic-checkpoint-unknown-outcome')
+const sessionId = brandString<SessionId>('semantic-checkpoint-unknown-outcome')
 const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 const task = 'Continue safely from the interrupted operation.'
 
@@ -49,21 +51,26 @@ async function seedInterruptedSession(root: string, cwd: string): Promise<string
   }
   const events: SessionEvent[] = [
     { type: 'turn/start', seq: SessionSeq(0), time: 10, data: { turn: 1 } },
-    { type: 'user/message', seq: SessionSeq(1), time: 11, data: createUserMessage({
+    { type: 'step/start', seq: SessionSeq(1), time: 11, data: { turn: 1, step: 1 } },
+    {
+      type: 'system/message', seq: SessionSeq(2), time: 12,
+      data: { turn: 1, step: 1, message: createMessage({ role: 'system', content: [], source: { kind: 'system-prompt' } }) },
+      surfaceOp: 'append',
+    },
+    { type: 'user/message', seq: SessionSeq(3), time: 13, data: createUserMessage({
       content: [{ type: 'text', text: 'Perform one side-effecting remote mutation.' }], source: { kind: 'user' },
     }), surfaceOp: 'append' },
-    { type: 'step/start', seq: SessionSeq(2), time: 12, data: { turn: 1, step: 1 } },
     {
       type: 'assistant/message',
-      seq: SessionSeq(3),
-      time: 13,
+      seq: SessionSeq(4),
+      time: 14,
       data: {
         turn: 1,
         step: 1,
         stream: [],
         message: createMessage({
           role: 'assistant',
-          content: [{ type: 'tool-call', id: ToolCallId('unknown-outcome-call'), name: 'write_remote', arguments: '{"value":1}' }],
+          content: [{ type: 'tool-call', id: brandString<ToolCallId>('unknown-outcome-call'), name: 'write_remote', arguments: '{"value":1}' }],
           source: {
             kind: 'model',
             ...{ provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -74,12 +81,12 @@ async function seedInterruptedSession(root: string, cwd: string): Promise<string
     },
     {
       type: 'tool/call',
-      seq: SessionSeq(4),
-      time: 14,
+      seq: SessionSeq(5),
+      time: 15,
       data: {
         turn: 1,
         step: 1,
-        callId: ToolCallId('unknown-outcome-call'),
+        callId: brandString<ToolCallId>('unknown-outcome-call'),
         name: 'write_remote',
         arguments: '{"value":1}',
       },
@@ -108,6 +115,7 @@ describe('semantic checkpoint recovery snapshot', () => {
       binArgs: [configPath, task],
       tsconfigPath,
       env: {
+        ...REPLAY_CREDENTIAL_ENV,
         DSH_SNAPSHOT_FILE: replayFixture,
         DSH_SNAPSHOT_OVERRIDE: replayOverride,
       },

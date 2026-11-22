@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
-import type { GoalRef } from '@deepseek-ai/dsh-goal'
-import SessionStore, { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { GoalError, type GoalRef } from '@deepseek-ai/dsh-goal'
+import SessionStore, { Session, type SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as commandGoal from '@deepseek-ai/dsh-command-goal'
+import { unsupportedModel, createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 interface Harness {
   readonly ctx: Context
@@ -20,20 +22,21 @@ interface Harness {
 /** Build a live idle agent accepted by the exact-identity goal service. */
 function stubAgent(ctx: Context, id: string): { agent: Agent; session: Session } {
   // Store-created: the command executor durably logs lifecycle events on it.
-  const session = ctx.sessions.create(SessionId(id))
-  const inbox = new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
+  const session = ctx.sessions.create(brandString<SessionId>(id))
+  const inbox = createInboxStub()
   let status: AgentStatus = 'idle'
   const agent: Agent = {
     id: session.id,
     options: {},
     session,
+    model: unsupportedModel(),
     inbox,
     ctx: new Context(),
     get status() { return status },
     send: () => {},
     followup: () => {},
     steer: () => {},
-    inject(input) { inbox.append('next-step', input) },
+    inject(input) { this.inbox.append('next-step', input) },
     cancel() { status = 'idle' },
     runMaintenance: task => task(new AbortController().signal),
     whenIdle() { return Promise.resolve() },
@@ -45,13 +48,13 @@ function stubAgent(ctx: Context, id: string): { agent: Agent; session: Session }
 async function harness(): Promise<Harness> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(GoalService)
   const plugin = await ctx.plugin(commandGoal)
   const { agent, session } = stubAgent(ctx, `command-goal-${Math.random()}`)
-  ctx.agents.register(agent)
+  await ctx.agents.register(agent)
   return { ctx, agent, session, plugin }
 }
 
@@ -97,8 +100,9 @@ describe('@deepseek-ai/dsh-command-goal registration', () => {
     expect(loader.unwrapExports(commandGoal)).toBe(commandGoal)
 
     expect(test.ctx.commands.list(test.agent)).toContainEqual({
+      definitionId: '@deepseek-ai/dsh-command-goal',
       name: 'goal',
-      description: 'set or view the goal for a long-running task',
+      description: 'Set or view the goal for a long-running task',
       input: { hint: '[<objective>|clear|edit <objective>|pause|resume]', attachments: true },
     })
     expect(test.ctx.commands.find(test.agent, 'goal')).toBeDefined()
@@ -233,6 +237,13 @@ describe('/goal human command', () => {
     const test = await harness()
     vi.spyOn(test.ctx.goals, 'get').mockImplementationOnce(() => { throw new Error('unexpected failure') })
     await expect(run(test)).rejects.toThrow('unexpected failure')
+  })
+
+  it('reports corrupt goal state instead of the generic invalid-command result', async () => {
+    const test = await harness()
+    const corrupt = new GoalError('goal replay failed at session event 3: invalid goal stream', 'GOAL_STATE_CORRUPT')
+    vi.spyOn(test.ctx.goals, 'get').mockImplementationOnce(() => { throw corrupt })
+    await expect(run(test)).rejects.toBe(corrupt)
   })
 })
 

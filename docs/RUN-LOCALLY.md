@@ -2,15 +2,16 @@
 
 把平台（模型网关 + 控制面 + 任务 Worker + 两个 MCP Server + 商店 UI）在本地跑起来，体验完整闭环。
 
-> 环境事实：macOS，Node v26.5.0，pnpm 11.21；podman 容器运行时；`adaptix-postgres`（PG16）/`adaptix-redis` 已在运行。
+> 环境事实：macOS 宿主 Node v26.5.0 / pnpm 11.21；当前 `dsh-source/` 要求 Node `^24.22.3 || >=26.13.1` 和 pnpm `11.28.5`，运行 Worker 时需切换到符合要求的 Node。podman 容器运行时；`adaptix-postgres`（PG16）/`adaptix-redis` 已在运行。
 > 模型：LiteLLM 网关（`configs/gateway/`，podman-compose 起，宿主端口 4001）做混合路由；云端路由 `cloud/deepseek` 走 DeepSeek 官方 `deepseek-v4-flash`（API key 用 `DS_API_KEY`，生产走 D20 密钥服务）；私有路由 `private/qwen-72b` 需 GPU/vLLM（D13）。
 > 仓库布局（2025-08 迁移后）：控制面 `apps/control-plane`、知识库 MCP `services/mcp-kb`、数据库 MCP `services/mcp-db`、商店 UI `web/store`、迁移在 `apps/control-plane/migrations`。
 
 ## 0. 前置
 
 ```sh
-node -v            # ^22.19 || >=24
-pnpm -v            # >=11.7
+node -v            # DSH: ^24.22.3 || >=26.13.1
+pnpm -v            # dsh-source 要求 11.28.5；必要时 npm install -g pnpm@11.28.5
+cd ..
 podman info        # 容器运行时（需要能拉镜像/起容器）
 # 模型密钥（网关/直连二选一；不写进任何文件，运行时 env 传递）
 export NVIDIA_KEY='nvapi-...'   # 仅旧 NVIDIA 路径；当前默认 DeepSeek 官方（DS_API_KEY，见「模型网关」节）
@@ -94,7 +95,7 @@ curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/chat/completions \
 > DSH 侧若与网关同网络用 `http://litellm:4000/v1`，否则用宿主地址 `http://127.0.0.1:${LITELLM_PORT:-4001}/v1`。
 > **鉴权**：网关 master key 独立（不要复用 `DS_API_KEY`）；把 `LITELLM_MASTER_KEY` 作为 `GATEWAY_KEY` 写入 D20 vault
 > （`curl -X PUT http://127.0.0.1:4000/api/admin/secrets/GATEWAY_KEY -H "Authorization: Bearer $ADMIN_JWT" -d '{"value":"<master>"}'`），
-> 交互实例（profile `llm-pi-ai` `apiKeyEnv: GATEWAY_KEY`）据此鉴权；任务 worker 若要经网关，需把 `llm-deepseek.apiKeyEnv` 改为 `GATEWAY_KEY` 且 `DEEPSEEK_BASE_URL` 指向网关。
+> 交互实例与任务 Worker 都通过 `llm-pi-ai` 的 `gateway` route 使用该引用；Worker 的 `llm-deepseek` route 保留给官方直连。
 
 ## 4. 启动任务 Worker（真实执行 Agent 任务）
 
@@ -102,16 +103,15 @@ curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/chat/completions \
 cd dsh-source/packages/platform/task-worker   # dsh-source 为仓库内 vendor 源码
 export DSH_HOME="$REPO_ROOT/.dsh-home"
 export DATABASE_URL="$PG_DSN"
-# 任务经 LiteLLM 网关（03 工单）：worker.cordis.yml 用 apiKeyEnv=GATEWAY_KEY（vault 存的网关 master key），
-# 模型/端点默认已指向网关（worker.ts 默认 cloud/deepseek + http://127.0.0.1:4001/v1）。
-# 覆盖为按需（若需直连 DeepSeek 则：DEEPSEEK_BASE_URL=https://api.deepseek.com DSH_MODEL=deepseek-v4-flash，并回退 apiKeyEnv=DEEPSEEK_API_KEY）
+# cloud/* 与 private/* 经 LiteLLM gateway；其他模型 id 使用官方 DeepSeek route。
+# 默认 cloud/deepseek + http://127.0.0.1:4001/v1；网关 key 从 D20 vault 按请求解析。
 export DSH_MODEL="${DSH_MODEL:-cloud/deepseek}"
-# export DEEPSEEK_BASE_URL=http://127.0.0.1:4001/v1    # 默认已是网关，可省
+# 直连示例：DSH_MODEL=deepseek-flash（使用 DEEPSEEK_API_KEY / DS_API_KEY）
 ./node_modules/.bin/tsx src/worker.ts
-# → [worker] ready (..., model=cloud/deepseek, baseURL=http://127.0.0.1:4001/v1)
+# → [worker] ready (..., model=cloud/deepseek)
 ```
 
-Worker 会拉起 DSH 运行时（`dsh-jsonrpc-agent` bin + `worker.cordis.yml`，内含知识库/数据库两个 MCP Server）。
+Worker 会通过新版 DSH SDK 拉起 JSON-RPC 运行时并加载 `worker.cordis.yml`，其中挂载知识库/数据库两个 MCP Server。
 
 ## 5. 启动商店 UI（Vite + React + TS）
 

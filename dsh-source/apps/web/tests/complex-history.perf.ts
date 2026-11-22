@@ -10,9 +10,11 @@ import type { Browser, CDPSession, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import {
-  ToolCallId,
+  type ToolCallId,
   createAssistantMessage,
+  createSystemMessage,
   createToolResultMessage,
   createUserMessage,
   expandAssistantStream,
@@ -22,7 +24,7 @@ import type { SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import {
   SESSION_FORMAT_VERSION,
   Session,
-  SessionId,
+  type SessionId,
 } from '@deepseek-ai/dsh-session'
 // Carries the session/title event declaration into the fixture builder.
 import type {} from '@deepseek-ai/dsh-session-title'
@@ -196,11 +198,18 @@ function appendTitle(session: Session, title: string, messageSeq: SessionSeq): v
   })
 }
 
+function appendSystemPrompt(session: Session, turn: number, step: number): void {
+  session.append('system/message', {
+    turn,
+    step,
+    message: createSystemMessage('Synthetic performance system prompt.'),
+  }, { surfaceOp: 'append' })
+}
+
 function appendRequestHeader(session: Session, turn: number, step: number): void {
   session.append('request/header', {
     header: {
       config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      system: `Synthetic performance system prompt for turn ${String(turn)}, step ${String(step)}.`,
     },
     reason: turn === 1 && step === 1 ? 'initial' : 'change',
   })
@@ -235,7 +244,7 @@ function appendToolStep(
   toolCount: number,
 ): void {
   const calls = Array.from({ length: toolCount }, (_, index) => {
-    const callId = ToolCallId(`perf-call-${String(turn)}-${String(index)}`)
+    const callId = brandString<ToolCallId>(`perf-call-${String(turn)}-${String(index)}`)
     const args = JSON.stringify({
       turn,
       index,
@@ -324,7 +333,7 @@ function fixtureLog(session: Session): string {
 }
 
 function smallSidebarFixture(): string {
-  const session = Session.create(SessionId('perf-small-template'))
+  const session = Session.create(brandString<SessionId>('perf-small-template'))
   session.append('turn/start', {
     turn: 1,
   })
@@ -334,6 +343,7 @@ function smallSidebarFixture(): string {
   }), { surfaceOp: 'append' })
   appendTitle(session, 'Synthetic sidebar session', user.seq)
   session.append('step/start', { turn: 1, step: 1 })
+  appendSystemPrompt(session, 1, 1)
   appendRequestHeader(session, 1, 1)
   appendToolStep(session, 1, 1, 2)
   session.append('step/end', { turn: 1, step: 1 })
@@ -346,7 +356,7 @@ function smallSidebarFixture(): string {
 }
 
 function longHistoryFixture(): string {
-  const session = Session.create(SessionId(LONG_SESSION_ID))
+  const session = Session.create(brandString<SessionId>(LONG_SESSION_ID))
   for (let turn = 1; turn <= LONG_HISTORY_TURNS; turn += 1) {
     session.append('turn/start', {
       turn,
@@ -360,6 +370,7 @@ function longHistoryFixture(): string {
     if (turn === 1) appendTitle(session, LONG_SESSION_TITLE, user.seq)
 
     session.append('step/start', { turn, step: 1 })
+    if (turn === 1) appendSystemPrompt(session, turn, 1)
     appendRequestHeader(session, turn, 1)
     if (turn % TOOL_TURN_INTERVAL === 0) {
       appendToolStep(session, turn, 1, TOOLS_PER_TOOL_TURN)
@@ -472,7 +483,7 @@ function soakTurn(index: number): ConversationTurnSpec {
 }
 
 function toolStream(index: number, marker: string): StreamChunk[] {
-  const callId = ToolCallId(`performance-tool-${marker.toLowerCase()}-${String(index)}`)
+  const callId = brandString<ToolCallId>(`performance-tool-${marker.toLowerCase()}-${String(index)}`)
   const args = JSON.stringify({
     command: `printf '${marker}\\n'`,
     description: `Emit performance marker ${String(index)}`,
@@ -999,9 +1010,9 @@ async function continueConversation(
       if (toolResult?.type !== 'tool/result') {
         throw new Error(`continued turn ${String(index)} did not log its tool result`)
       }
-      const resultBlock = toolResult.data.message.content.find(block => block.type === 'tool-result')
-      expect(resultBlock?.isError).toBe(false)
-      expect(resultBlock?.content
+      const message = toolResult.data.message
+      expect(message.isError).toBe(false)
+      expect(message.content
         .filter(block => block.type === 'text')
         .map(block => block.text)
         .join('')).toContain(spec.toolResultMarker)
@@ -1332,7 +1343,7 @@ describe('manual web performance: complex workspace and history', () => {
         startingTurns: DEFAULT_HISTORY_TURNS,
         turnCount: COMPARISON_TURNS,
         turnSpec: comparisonTurn,
-        expectedSessionId: SessionId(LONG_SESSION_ID),
+        expectedSessionId: brandString<SessionId>(LONG_SESSION_ID),
       })
       expect(conversation.toolTurns).toBe(2)
       console.info(`WEB_PERF_RESULT ${JSON.stringify({
@@ -1378,7 +1389,7 @@ describe('manual web performance: complex workspace and history', () => {
         startingTurns: LONG_HISTORY_TURNS,
         turnCount: COMPARISON_TURNS,
         turnSpec: comparisonTurn,
-        expectedSessionId: SessionId(LONG_SESSION_ID),
+        expectedSessionId: brandString<SessionId>(LONG_SESSION_ID),
       })
       expect(conversation.toolTurns).toBe(2)
       console.info(`WEB_PERF_RESULT ${JSON.stringify({

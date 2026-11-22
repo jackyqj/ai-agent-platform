@@ -6,8 +6,8 @@ const cordis = new URL('../../../../packages/platform/task-worker/worker.cordis.
 await using harness = new DeepSeekHarness({
   profile: 'sdk',
   patches: [cordis],
-  provider: 'deepseek-official',
-  model: 'deepseek-ai/deepseek-v4-flash-0731',
+  provider: 'gateway',
+  model: process.env.DSH_MODEL ?? 'cloud/deepseek',
   maxTokens: 8192,
 })
 const result = await harness.run('用知识库查一下：跨市出差交通费上限多少？', { sessionId: 'worker-smoke-1' })

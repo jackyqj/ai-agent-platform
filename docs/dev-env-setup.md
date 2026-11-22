@@ -1,16 +1,16 @@
 # DSH 开发环境搭建记录（Phase 0，01 工单）
 
-> 环境事实：macOS（Node v26.5.0 / pnpm 11.21 / npm 12），仓库 `dsh-source/`（0.1.3-alpha.1，tag `dsh-v0.1.3-alpha.1` / `d347e703`）。
+> 环境事实：宿主 macOS 为 Node v26.5.0 / pnpm 11.21；当前 DSH `0.2.3-alpha.2` 要求 Node `^24.22.3 || >=26.13.1` 与 pnpm `11.28.5`，升级验证使用隔离 Node v26.13.1。
 > 开发基线以 **源码树 `dsh-source/` 为准**（跟随上游，版本锁定策略见 map.md D7）。
 
 ## 关键环境事实
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| 仓库 | `/Users/jac/sw_dir/ai-agent-platform/dsh-source/` | vendor 源码，HEAD = 0.1.3-alpha.1 |
-| Node | v26.5.0 | 满足 `^22.19 \|\| >=24` |
-| pnpm | 11.21（仓库 pin 11.7） | 工作区解析正常 |
-| 构建 | `pnpm install` 41.5s + `pnpm run build` 成功 | 219 包 + Web 前端 dist |
+| 仓库 | `/Users/jac/sw_dir/ai-agent-platform/dsh-source/` | vendor 源码，HEAD = 0.2.3-alpha.2 |
+| Node | 宿主 v26.5.0；隔离验证 v26.13.1 | DSH 要求 `^24.22.3 \|\| >=26.13.1` |
+| pnpm | 宿主 11.21；DSH pin 11.28.5 | 按 DSH `packageManager` 运行 |
+| 构建 | 本次升级的全量 build 与 typecheck 均通过 | `dsh-source/` 上游源码与平台 Provider/Worker |
 | 启动 | `pnpm dsh --profile <name> <args>` | TypeScript 源码入口（tsx） |
 | DSH_HOME | `/Users/jac/sw_dir/ai-agent-platform/.dsh-home/` | **沙箱要求：DSH_HOME 必须指到工作区内**（`~/.dsh` 会被文件沙箱拦截） |
 
@@ -23,7 +23,8 @@
 ## 可复现步骤
 
 ```sh
-# 1. 安装依赖
+# 1. 选择满足 dsh-source/package.json engines 的 Node，并安装 pinned pnpm
+npm install --global pnpm@11.28.5
 cd dsh-source && pnpm install
 
 # 2. 构建（全量：包 + Web 前端）
@@ -40,7 +41,7 @@ DSH_HOME=$PWD/../.dsh-home pnpm dsh --profile web --port 3277     # HTTP 200 + _
 DSH_HOME=$PWD/../.dsh-home pnpm dsh --profile headless "task text"
 ```
 
-## 验证结果（2025-08-16）
+## 历史验证结果（2025-08-16）
 
 - [x] `pnpm install` + `pnpm run build` 成功
 - [x] `--dump-config` 分层组合树正确（base → web-app → patch）
@@ -48,6 +49,15 @@ DSH_HOME=$PWD/../.dsh-home pnpm dsh --profile headless "task text"
 - [x] headless 启动：模型调用失败于 `MISSING_CREDENTIAL`（无 DEEPSEEK_API_KEY，预期）
 - [x] **MCP 挂载验证**：headless + mcp-client stdio 成功拉起 `company-mcp-kb` 子进程
   （工具注册先于模型调用；缺 key 失败点确认非 MCP 链路问题）
+
+## DSH 0.2.3-alpha.2 升级验证
+
+- `pnpm install --no-frozen-lockfile` 成功；使用 Node v26.13.1 与 pnpm 11.28.5。
+- `pnpm run build` 的 10 个 gate 全部通过；最终代码另经 `pnpm run typecheck` 的 5 个 gate 验证。
+- PG Session Provider 测试 35/35、PG Credentials Provider 测试 16/16、Worker 测试 2/2 通过；数据库测试仅使用 `dsh_pg_test`，并仅在该测试库应用 `006_secrets.sql`。
+- 公司 profile 与 SDK Worker patch 的 `--dump-config` 均验证了 PG 凭据提供方、MCP 插件及模型路由组合；未执行真实模型调用。
+- 文档链接、换行和两个凭据 README 与 Session PG README 的双语配对检查通过。`verify-package-readme-model-experience` 仍报告 `packages/platform/task-worker/README.md` 与 `packages/platform/tool-mcp-visibility/README.md` 缺失。
+- 旧版 PG 会话仍保留在数据库中，但 v4 Provider 会拒绝读取 v2 格式；本次未执行数据库迁移。
 
 ## 待办（需人类/凭据）
 

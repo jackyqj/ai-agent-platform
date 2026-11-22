@@ -12,9 +12,10 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { SessionSeq, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionSeq, SESSION_FORMAT_VERSION, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
-import { MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
+import { type MessageId, freezeMessage } from '@deepseek-ai/dsh-llm'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import {
   SessionAlreadyExistsError,
   SessionAlreadyOwnedError,
@@ -51,7 +52,7 @@ export interface ContractBackend extends ContractBackendInstance {
 export function meta(id: string, cwd?: string): SessionHeader {
   return {
     version: SESSION_FORMAT_VERSION,
-    id: SessionId(id),
+    id: brandString<SessionId>(id),
     createdAt: 1000,
     isSeeded: false,
     ...cwd !== undefined ? { cwd } : {},
@@ -63,7 +64,7 @@ export function oneTurnLog(): SessionEvent[] {
   return [
     { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
     { type: 'user/message', seq: SessionSeq(1), time: 2, data: freezeMessage({
-      id: MessageId('one-turn-user'),
+      id: brandString<MessageId>('one-turn-user'),
       role: 'user',
       content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' },
     }), surfaceOp: 'append' },
@@ -71,7 +72,7 @@ export function oneTurnLog(): SessionEvent[] {
     { type: 'assistant/message', seq: SessionSeq(3), time: 4, data: {
       turn: 1, step: 1,
       message: freezeMessage({
-        id: MessageId('one-turn-assistant'),
+        id: brandString<MessageId>('one-turn-assistant'),
         role: 'assistant',
         content: [{ type: 'text', text: 'hello' }],
         source: {
@@ -152,13 +153,17 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         // An empty batch is a no-op, not an error.
         await handle.append([])
         // A write handle reads its own successful appends.
-        expect(await handle.read()).toEqual(log)
-        expect(await handle.read(3)).toEqual(log.slice(3))
-        expect(await handle.read(0, 2)).toEqual(log.slice(0, 2))
-        expect(await handle.read(1, 3)).toEqual(log.slice(1, 4))
+        const full = await handle.read()
+        expect(full.events).toEqual(log)
+        if (full.eventState === 'shared-frozen') {
+          expect(full.events.every(event => Object.isFrozen(event) && Object.isFrozen(event.data))).toBe(true)
+        }
+        expect((await handle.read(3)).events).toEqual(log.slice(3))
+        expect((await handle.read(0, 2)).events).toEqual(log.slice(0, 2))
+        expect((await handle.read(1, 3)).events).toEqual(log.slice(1, 4))
         // At/past the stored end: an empty list, never an error.
-        expect(await handle.read(log.length)).toEqual([])
-        expect(await handle.read(log.length + 100)).toEqual([])
+        expect((await handle.read(log.length)).events).toEqual([])
+        expect((await handle.read(log.length + 100)).events).toEqual([])
         // flush after a durable append is a satisfied barrier, not an error.
         await handle.flush()
         await handle.close()
@@ -237,8 +242,8 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
     it('open of an absent session rejects with SessionPersistenceNotFoundError for both accesses', async () => {
       const { persistence, dispose } = await make()
       try {
-        await expect(persistence.open(SessionId('absent'), 'read')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
-        await expect(persistence.open(SessionId('absent'), 'write')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
+        await expect(persistence.open(brandString<SessionId>('absent'), 'read')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
+        await expect(persistence.open(brandString<SessionId>('absent'), 'write')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
       } finally {
         await dispose()
       }
@@ -258,7 +263,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         // After close, a new write handle continues at the stored next-seq.
         const writer = await persistence.open(m.id, 'write')
         await writer.append(secondTurn())
-        expect((await writer.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+        expect((await writer.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
         await writer.close()
       } finally {
         await dispose()
@@ -278,7 +283,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await expect(reader.append(secondTurn())).rejects.toBeInstanceOf(SessionReadOnlyError)
         await expect(reader.flush()).rejects.toBeInstanceOf(SessionReadOnlyError)
         // The refusals mutated nothing.
-        expect(await reader.read()).toEqual(oneTurnLog())
+        expect((await reader.read()).events).toEqual(oneTurnLog())
         await reader.close()
       } finally {
         await dispose()
@@ -324,9 +329,9 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
           const reopened = await backend.reopen()
           try {
             // The barrier materialized the empty session durably...
-            expect(await reopened.persistence.stat(SessionId('flush-all'))).toBeDefined()
+            expect(await reopened.persistence.stat(brandString<SessionId>('flush-all'))).toBeDefined()
             // ...while the one that closed unappended never existed.
-            expect(await reopened.persistence.stat(SessionId('flush-all-closing'))).toBeUndefined()
+            expect(await reopened.persistence.stat(brandString<SessionId>('flush-all-closing'))).toBeUndefined()
           } finally {
             await reopened.dispose()
           }
@@ -343,13 +348,13 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         const m = meta('lazy', '/work')
         const creator = await backend.persistence.create(m)
         // The creator's own reads see the empty log before materialization.
-        expect(await creator.read()).toEqual([])
+        expect((await creator.read()).events).toEqual([])
 
         const snapshot = await backend.persistence.stat(m.id)
         expect(snapshot?.header).toMatchObject(m)
         expect((await backend.persistence.list()).map(s => s.header.id)).toContain(m.id)
         const reader = await backend.persistence.open(m.id, 'read')
-        expect(await reader.read()).toEqual([])
+        expect((await reader.read()).events).toEqual([])
         await reader.close()
 
         if (backend.reopen !== undefined) {
@@ -397,7 +402,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
           expect((await reopened.persistence.list()).map(s => s.header.id)).toContain(m.id)
           expect((await reopened.persistence.stat(m.id))?.header).toMatchObject(m)
           const reader = await reopened.persistence.open(m.id, 'read')
-          expect(await reader.read()).toEqual([])
+          expect((await reader.read()).events).toEqual([])
           await reader.close()
         } finally {
           await reopened.dispose()
@@ -415,14 +420,14 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await writer.append(oneTurnLog())
 
         const before = await persistence.open(m.id, 'read')
-        expect(await before.read()).toEqual(oneTurnLog())
+        expect((await before.read()).events).toEqual(oneTurnLog())
 
         await writer.append(secondTurn())
         // Both a pre-existing read handle and a freshly opened one observe the
         // append once it has resolved.
-        expect((await before.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+        expect((await before.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
         const after = await persistence.open(m.id, 'read')
-        expect((await after.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+        expect((await after.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
         await before.close()
         await after.close()
         await writer.close()
@@ -444,7 +449,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         try {
           const writer = await reopened.persistence.open(m.id, 'write')
           await writer.append(secondTurn())
-          expect((await writer.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+          expect((await writer.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
           await writer.close()
         } finally {
           await reopened.dispose()
@@ -469,7 +474,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         ]
         await expect(handle.append(gapped)).rejects.toThrow(/expected 7/)
         // Neither rejection changed the stored log.
-        expect((await handle.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5])
+        expect((await handle.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5])
         await handle.close()
       } finally {
         await dispose()
@@ -489,7 +494,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await expect(handle.append(bad(undefined))).rejects.toThrow(/losslessly JSON-serializable/)
         // The rejected batches left no events behind: seq 0 is still free.
         await handle.append(oneTurnLog())
-        expect(await handle.read()).toEqual(oneTurnLog())
+        expect((await handle.read()).events).toEqual(oneTurnLog())
         await handle.close()
       } finally {
         await dispose()
@@ -546,14 +551,14 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         const readerInstance = await backend.reopen()
         try {
           const reader = await readerInstance.persistence.open(m.id, 'read')
-          expect(await reader.read()).toEqual(oneTurnLog())
+          expect((await reader.read()).events).toEqual(oneTurnLog())
           await reader.close()
 
           // A write open + first append durably truncates the torn tail and
           // continues at the committed next-seq.
           const writer = await readerInstance.persistence.open(m.id, 'write')
           await writer.append(secondTurn())
-          expect((await writer.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+          expect((await writer.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
           await writer.close()
         } finally {
           await readerInstance.dispose()
@@ -563,7 +568,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         const verifyInstance = await backend.reopen()
         try {
           const verify = await verifyInstance.persistence.open(m.id, 'read')
-          expect((await verify.read()).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+          expect((await verify.read()).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
           await verify.close()
         } finally {
           await verifyInstance.dispose()
@@ -601,7 +606,7 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await reader.close()
         await writer.close()
 
-        expect(await persistence.stat(SessionId('absent-stat'))).toBeUndefined()
+        expect(await persistence.stat(brandString<SessionId>('absent-stat'))).toBeUndefined()
       } finally {
         await dispose()
       }

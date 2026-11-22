@@ -52,12 +52,17 @@
 # 按请求 resolve；vault 优先于 env，admin 轮换无需重启实例。
 # CP_SECRETS_URL 非空 → HTTP（容器）；否则直连 PG（worker / 本机 CLI）。
 - id: credentials
-  name: '@deepseek-ai/dsh-credentials-pg'
-  config:
-    url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
-    masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
-    resolveUrl: !!js process.env.CP_SECRETS_URL ?? ''
-    token: !!js process.env.CP_SECRETS_TOKEN ?? ''
+  name: '@deepseek-ai/dsh-credentials-local'
+  disabled: true
+
+- insert:
+    - id: credentials-pg
+      name: '@deepseek-ai/dsh-credentials-pg'
+      config:
+        url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
+        masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
+        resolveUrl: !!js process.env.CP_SECRETS_URL ?? ''
+        token: !!js process.env.CP_SECRETS_TOKEN ?? ''
 
 # ── 共享会话存储（08 工单：PG 持久化替代 JSONL）────────────────────────────
 # 会话事件落 PostgreSQL（dsh_sessions schema），跨实例/跨设备可恢复。
@@ -71,17 +76,18 @@
 
 # ── 内部 MCP Server（04 工单的接入位，一个 Server 一行）────────────────────
 # Phase 0：stdio 模式（DSH 拉起子进程，内部单机首选）
-- id: mcp-kb
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: kb
-    transport: stdio
-    command: node
-    args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
-    env:
-      KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
-      KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
-      EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
+- insert:
+    - id: mcp-kb
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb
+        transport: stdio
+        command: node
+        args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
+        env:
+          KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
+          KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
+          EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
 #
 # Phase 1+ 服务化升级：streamable-http（SDK HTTP 路径修复后启用，见 04 README 已知问题）
 # - id: mcp-db

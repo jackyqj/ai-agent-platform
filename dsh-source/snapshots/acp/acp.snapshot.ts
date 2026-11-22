@@ -35,6 +35,7 @@ const controllerCases: readonly {
   { name: 'escalation-approved', hasModelTurn: true },
   { name: 'escalation-rejected', hasModelTurn: true },
   { name: 'fs-escalation-approved', hasModelTurn: true },
+  { name: 'fs-same-mode', hasModelTurn: true },
   {
     name: 'image-compaction',
     hasModelTurn: true,
@@ -61,6 +62,7 @@ const scenarios: Scenario[] = controllerCases.map((controller) => {
     ...(manifest.replay?.override === true ? { overridden: true } : {}),
     ...(manifest.header.pin === true ? { pinsHeader: true } : {}),
     ...(manifest.header.changes === undefined ? {} : { expectedHeaderChanges: manifest.header.changes }),
+    ...(manifest.header.promptChanges === undefined ? {} : { expectedPromptChanges: manifest.header.promptChanges }),
     headerClass: manifest.header.class,
     ...(systemPromptSource === undefined ? {} : { systemPromptSource }),
     ...(toolSchemasSource === undefined ? {} : { toolSchemasSource }),

@@ -3,9 +3,9 @@
 | 项 | 值 |
 |---|---|
 | 系统 | `ai-agent-platform`（公司内部 AI Agent 使用平台） |
-| 状态 | 按 **2026-09-05 仓库代码** 描述现状，不是远期蓝图 |
+| 状态 | 按 **2026-11-22 DSH 升级后的仓库代码** 描述现状，不是远期蓝图 |
 | 读者 | 平台工程师、架构评审、接手维护的 AI 工程师 |
-| 上游内核 | DeepSeek Harness（DSH）`0.1.3-alpha.1`，vendor 于 `dsh-source/` |
+| 上游内核 | DeepSeek Harness（DSH）`0.2.3-alpha.2`（pre-release），vendor 于 `dsh-source/` |
 | 姊妹文档 | `spec.md`（目标与 ADR）、`enterprise-shell.md`（外壳草图）、`map.md`（决策表）、`STATUS.md`（工单进度）、`RUN-LOCALLY.md`（本地跑通） |
 
 本文档遵循 [arc42](https://arc42.org) 十二章。图一律用 mermaid。与代码冲突时以代码为准；与 `spec.md` 冲突时以 **D22 之后的员工路径** 为准。
@@ -63,7 +63,7 @@
 | 约束 | 来源 | 代码事实 |
 |---|---|---|
 | DSH 单用户、无认证 | `dsh-host-webserver` | 控制面监听 `127.0.0.1`；DSH 实例只应走 loopback / 子进程 |
-| DSH pre-release | Session format v2 | 锁 `dsh-v0.1.3-alpha.1`；平台 Provider 自有，不混进上游发布 |
+| DSH pre-release | Session format v4 | 锁 `dsh-v0.2.3-alpha.2`；平台 Provider 自有，不混进上游发布 |
 | 控制面语言 | 评审 D9 | NestJS + Fastify，Node/TypeScript |
 | 运行时驱动 | 官方 SDK | `@deepseek-ai/dsh-sdk-client`，JSON-RPC over stdio |
 | 容器运行时 | 环境 | 编排器用 `podman`（`CP_CONTAINER_CMD` 可换 docker） |
@@ -323,11 +323,13 @@ Vite + React 单页。路由靠 hash：`store` / `chat` / `admin` / `skills`。`
 1. 消费 Redis 队列 `agent-tasks`
 2. 读 PG `tasks` 行，解析 `payload.task` / `permissionMode` / `sessionId`
 3. vault 解析 `GATEWAY_KEY` 等引用
-4. `DeepSeekHarness` 拉起 `jsonrpc-demo` bin + `worker.cordis.yml`
+4. `DeepSeekHarness` 通过 JSON-RPC SDK 拉起 DSH，并加载 `worker.cordis.yml`
 5. `session_id`：有商店会话则复用；一次性任务（IM/cron/图）用 `task-{id}-a{attempt}` 隔离重试
 6. 写回 `done`/`failed`；启动与周期扫描孤儿 `running` 任务
 
-`worker.cordis.yml` 挂载：JSON-RPC server、credentials-pg、llm-deepseek（经网关）、sandbox、agent-spine（公司助手 persona，关闭 bash/jobs/skills）、mcp-kb、mcp-db、subagent/workflow、JSONL 会话根（worker 本地；共享事件链由 PG Provider 在交互 profile 侧承担）。
+`worker.cordis.yml` 挂载：JSON-RPC server、credentials-pg、`llm-pi-ai`（LiteLLM gateway route；官方直连使用 `llm-deepseek`）、sandbox、agent-spine（公司助手 persona，关闭 bash/jobs/skills）、mcp-kb、mcp-db、subagent/workflow 和 Worker 本地 JSONL 会话根。公司交互 profile 使用平台自有 PG Provider 保存共享会话。
+
+PG Provider 只接受当前 DSH Session format，不迁移旧格式；旧记录保留在数据库中，但在执行独立迁移前无法打开。
 
 ### 5.5 DSH 内核构建块（执行黑盒的内部）
 
@@ -619,7 +621,7 @@ flowchart TB
 
 - 控制面：`DATABASE_URL`、`CP_REDIS_URL`、`CP_AUTH_MODE`、`CP_JWT_SECRET`、`CP_ORCHESTRATOR`、`CP_MAX_INSTANCES`、`CP_ROLE_MAP_BY_DEPT`
 - 密钥：`SECRETS_MASTER_KEY`；网关 master 以 `GATEWAY_KEY` 入 vault
-- Worker：`DSH_MODEL`（`cloud/*` 则打网关）、`DEEPSEEK_BASE_URL`、`CP_WORKER_CONCURRENCY`（默认 2）、同用户串行在**单 worker 进程内**保证
+- Worker：`DSH_MODEL`（`cloud/*`、`private/*` 走网关，其余走官方 DeepSeek）、`GATEWAY_BASE_URL`、`DEEPSEEK_BASE_URL`、`CP_WORKER_CONCURRENCY`（默认 2）、同用户串行在**单 worker 进程内**保证
 
 ### 7.5 数据迁移
 

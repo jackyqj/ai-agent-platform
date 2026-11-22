@@ -1,9 +1,32 @@
+---
+description: "Resolve DSH credentials from the encrypted control-plane vault or secrets API, with per-request lookup and environment fallback."
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-credentials-pg
+
+English | [中文](README.zh.md)
+
+## Summary
+
+Resolve DSH credentials from encrypted control-plane vault rows or the secrets API, with per-request lookup and environment fallback.
+
+## Table of Contents
+
+- [Config](#config)
+- [Precedence](#precedence)
+- [Helper](#helper)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
 
 PostgreSQL credential vault provider (platform-owned, 09 工单 / D20). Implements `ctx.credentials` over the control-plane `credential_secrets` table (AES-256-GCM), or over HTTP resolve so interactive containers never hold the vault master key. Vault wins over the process environment so an admin rotation reaches the next `resolve` without restarting the runtime. Values are never cached.
 
-> **定位声明**：平台自有 Provider，非上游仓库提交物。剩余上游门禁项（doc-sync、双语 README、Agent Note）待「是否贡献上游」决策后补齐。
+> **Ownership:** This is a platform-owned provider, maintained in this repository rather than upstream DSH.
 
+<a id="config"></a>
 ## Config
 
 Trusted worker (direct PG decrypt):
@@ -39,6 +62,7 @@ Interactive container (HTTP; no master key):
 
 Replace `dsh-credentials-local` in platform compositions. Do not inject `DEEPSEEK_API_KEY` into the runtime environment: the adapter resolves `apiKeyEnv` per request through this provider.
 
+<a id="precedence"></a>
 ## Precedence
 
 | Layer | Source id | Writable |
@@ -48,6 +72,7 @@ Replace `dsh-credentials-local` in platform compositions. Do not inject `DEEPSEE
 
 An empty stored or environment value is absent (seam-wide rule). `describe()` never includes the secret.
 
+<a id="helper"></a>
 ## Helper
 
 `lookupSecret(query, masterKey, ref)` decrypts one row for callers that already hold a PG pool (task-worker MCP env injection).
@@ -64,4 +89,13 @@ No direct invalidation; credentials never enter a request prefix.
 
 - **Container DNS** — `CP_SECRETS_URL` defaults to `http://127.0.0.1:<CP_PORT>/api/internal/secrets`; podman/docker needs a host-reachable URL such as `http://host.containers.internal:4000/api/internal/secrets`
 - **Test `memory:` URL** — in-memory mode is for unit tests; a missing postgres `url` fails loud at construction (PG mode only)
-- 平台自有定位：双语 README、doc-sync 待团队决策后补齐
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>

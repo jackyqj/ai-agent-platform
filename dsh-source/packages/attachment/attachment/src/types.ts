@@ -2,7 +2,7 @@
 
 import type { AttachmentId, ImageVariantId } from './brand.ts'
 
-export type { AttachmentId } from './brand.ts'
+export type { AttachmentId, ImageVariantId } from './brand.ts'
 
 /** Raster image formats accepted by the version-one attachment path. */
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
@@ -106,10 +106,16 @@ export type PromptContentPart =
     readonly name?: string
   }
 
-/** Host prompt content whose file receipts are resolved and whose image bytes await admission. */
+/**
+ * Host prompt content whose upload receipts are resolved. An image part
+ * carries encoded bytes awaiting admission, or references an image this
+ * service already stored for an upload the same Session staged, with
+ * `encodedBytes` holding the byte length of that upload.
+ */
 export type AttachmentAdmissionPart =
   | PromptContentPart
   | { readonly type: 'file'; readonly attachment: FileAttachmentRef }
+  | { readonly type: 'image'; readonly attachment: ImageAttachmentRef; readonly encodedBytes: number }
 
 /** Host-admitted prompt content with every attachment represented by its durable reference. */
 export type AdmittedPromptContentPart =
@@ -132,12 +138,16 @@ export interface StoredImageAttachment {
   data: Uint8Array
 }
 
-/** Deterministic request-image policy selected by one exact model route. */
-export interface ImageRequestPolicy {
-  /** Maximum width multiplied by height after aspect-preserving projection. */
-  maxPixels: number
-  /** Encoded-byte target before base64 expansion or Files API upload; the smallest quality-ladder output is kept when no quality fits. */
-  maxBytes: number
+/** Deterministic request-image target selected by one exact model route for one attachment. */
+export interface ImageRequestTarget {
+  /** Maximum request width in pixels; byte-limit enforcement can produce a smaller image. */
+  width: number
+  /** Maximum request height in pixels; byte-limit enforcement can produce a smaller image. */
+  height: number
+  /** Hard encoded-byte limit before base64 expansion or Files API upload; successful results never exceed it. */
+  maxImageBytes: number
+  /** Preferred encoded-byte target, no greater than maxImageBytes; exceeding only this target does not reduce resolution. */
+  imageTargetBytes: number
 }
 
 /** Cached request version derived from one provider-independent normalized attachment. */

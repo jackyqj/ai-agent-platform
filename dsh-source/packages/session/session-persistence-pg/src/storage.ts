@@ -23,6 +23,7 @@ import type {
   SessionHandle,
   SessionHandleAppendOptions,
   SessionHandleFlushOptions,
+  SessionHandleReadResult,
   SessionHandleReadOptions,
 } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionWriteLease } from './lease.ts'
@@ -46,7 +47,7 @@ export interface PgHandleStorage {
   /** Resolve the session's artifact path, or `undefined` before materialization. */
   resolveLog(id: SessionId, signal?: AbortSignal): Promise<string | undefined>
   /** Read and validate the stored log at `path`. */
-  readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<{ events: SessionEvent[] }>
+  readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<SessionHandleReadResult>
   /** Whether the id is still a created-but-unmaterialized session here. */
   hasPendingSession(id: SessionId): boolean
   /** Acquire the session's cross-process write lock (PostgreSQL advisory lock). */
@@ -110,7 +111,7 @@ export class PgSessionHandle implements SessionHandle {
    * @param options - optional cancellation.
    * @returns the requested slice.
    */
-  async read(offset = 0, length = Number.MAX_SAFE_INTEGER, options?: SessionHandleReadOptions): Promise<readonly SessionEvent[]> {
+  async read(offset = 0, length = Number.MAX_SAFE_INTEGER, options?: SessionHandleReadOptions): Promise<SessionHandleReadResult> {
     // Closed-handle refusal precedes argument validation: a closed handle
     // rejects SessionHandleClosedError regardless of the arguments.
     this.assertOpen('read')
@@ -123,22 +124,22 @@ export class PgSessionHandle implements SessionHandle {
     options?.signal?.throwIfAborted()
     if (this.state.primed !== undefined) {
       this.observedLength = Math.max(this.observedLength, this.state.primed.length)
-      return this.state.primed.slice(offset, offset + length)
+      return { eventState: 'shared-frozen', events: this.state.primed.slice(offset, offset + length) }
     }
     // A write handle knows its own materialization; a read handle asks the
     // backend so a writer's later materialization becomes visible here.
-    if (this.access === 'write' && !this.state.materialized) return []
+    if (this.access === 'write' && !this.state.materialized) return { eventState: 'detached', events: [] }
     const path = await this.storage.resolveLog(this.id, options?.signal)
     if (path === undefined) {
-      if (this.storage.hasPendingSession(this.id)) return []
+      if (this.storage.hasPendingSession(this.id)) return { eventState: 'detached', events: [] }
       throw new SessionPersistenceNotFoundError(this.id)
     }
-    const { events } = await this.storage.readStoredLog(path, this.id, options?.signal)
-    if (events.length < this.observedLength) {
-      throw new Error(`session "${this.id}": stored log shrank below a previously observed prefix (${events.length} < ${this.observedLength})`)
+    const result = await this.storage.readStoredLog(path, this.id, options?.signal)
+    if (result.events.length < this.observedLength) {
+      throw new Error(`session "${this.id}": stored log shrank below a previously observed prefix (${result.events.length} < ${this.observedLength})`)
     }
-    this.observedLength = events.length
-    return events.slice(offset, offset + length)
+    this.observedLength = result.events.length
+    return { eventState: result.eventState, events: result.events.slice(offset, offset + length) }
   }
 
   /**
@@ -492,8 +493,9 @@ export class PgBackendTracker {
    * owns no separate storage connection, so closing handles is the complete
    * teardown. Registrations are effects of the current fiber.
    * @param ctx - the backend's context.
+   * @param closeStorage - close provider-owned storage after every handle settles.
    */
-  install(ctx: Context): void {
+  install(ctx: Context, closeStorage: () => Promise<void>): void {
     ctx.on('session/event', (session: Session, event) => {
       this.writers.get(session.id)?.enqueueLive(event, (error) => {
         ctx.logger.warn(`session-persistence: background write for session "${session.id}" failed (buffered events retained): ${String(error)}`)
@@ -522,6 +524,11 @@ export class PgBackendTracker {
         } catch (error: unknown) {
           errors.push(error)
         }
+      }
+      try {
+        await closeStorage()
+      } catch (error: unknown) {
+        errors.push(error)
       }
       if (errors.length > 0) throw new AggregateError(errors, `${this.name} dispose failed`)
     }, `${this.name} open handles`)

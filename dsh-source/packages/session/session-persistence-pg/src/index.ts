@@ -17,6 +17,7 @@ import {
   SessionAlreadyExistsError, SessionPersistenceNotFoundError,
   assertStoredId, assertVersion, materializeCreateHeader, validateStoredEvents,
   type SessionAccess, type SessionHandle,
+  type SessionHandleReadResult,
   type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
@@ -39,6 +40,19 @@ function envelopeBindings(event: SessionEvent): [string | null, string | null, n
     se.surfaceOp !== undefined ? JSON.stringify(se.surfaceOp) : null,
     event.ignorable === true ? 1 : null,
   ]
+}
+
+function freezeStoredEvents(events: SessionEvent[]): void {
+  const pending: object[] = [...events]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (current === undefined) continue
+    Object.freeze(current)
+    for (const value of Object.values(current)) {
+      if (value !== null && typeof value === 'object') pending.push(value)
+    }
+  }
+  Object.freeze(events)
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -92,11 +106,10 @@ export class PgSessionPersistence extends SessionPersistence {
   constructor(ctx: Context, public config: Config) {
     super(ctx)
     this.ready = this.openStore(config.url)
-    ctx.effect(() => async () => {
+    this.tracker.install(ctx, async () => {
       await this.ready.catch(() => undefined)
       await this.pool?.end()
-    }, `${this.name} pool`)
-    this.tracker.install(ctx)
+    })
   }
 
   async create(header: SessionHeader, options?: SessionPersistenceCreateOptions): Promise<SessionHandle> {
@@ -110,11 +123,25 @@ export class PgSessionPersistence extends SessionPersistence {
     }
     options?.signal?.throwIfAborted()
     this.tracker.registerCreated(snapshot, inheritedEventCount)
-    return this.tracker.adopt(new PgSessionHandle(this, snapshot.id, snapshot, 'write', {
+    const handle = this.tracker.adopt(new PgSessionHandle(this, snapshot.id, snapshot, 'write', {
       cursor: 0,
       materialized: false,
       inheritedEventCount,
     }))
+    const seed = options?.parentSource?.events
+    if (seed === undefined) return handle
+    try {
+      if (seed.length === 0) await handle.flush(options)
+      else await handle.append(seed, options)
+      return handle
+    } catch (error: unknown) {
+      try {
+        await handle.close()
+      } catch (closeError: unknown) {
+        throw new AggregateError([error, closeError], 'Fork creation and handle cleanup failed')
+      }
+      throw error
+    }
   }
 
   async open(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions): Promise<SessionHandle> {
@@ -212,10 +239,10 @@ export class PgSessionPersistence extends SessionPersistence {
     return snapshots
   }
 
-  async readStoredLog(_path: string, expectedId: SessionId, signal?: AbortSignal): Promise<{ events: SessionEvent[] }> {
+  async readStoredLog(_path: string, expectedId: SessionId, signal?: AbortSignal): Promise<SessionHandleReadResult> {
     signal?.throwIfAborted()
     const stored = await this.requireStoredLog(expectedId)
-    return { events: stored.events }
+    return { eventState: 'shared-frozen', events: stored.events }
   }
 
   async resolveLog(id: SessionId, _signal?: AbortSignal): Promise<string | undefined> {
@@ -335,6 +362,7 @@ export class PgSessionPersistence extends SessionPersistence {
     const eventRows = await this.queryEvents(id)
     const { preserved, tornFrom } = scanRows(eventRows)
     validateStoredEvents(meta, preserved)
+    freezeStoredEvents(preserved)
     return {
       meta,
       events: preserved,

@@ -276,7 +276,7 @@ JD 中「参与公司大模型应用平台的搭建与迭代（RAG 知识库问�
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| DSH 处于 pre-release（0.1.0-rc），README 明示 "THERE WILL BE COMPATIBILITY-BREAKING CHANGES"，`SESSION_FORMAT_VERSION=0` 无兼容承诺 | 平台层代码/存量会话失配 | 锁定版本跟随；平台层只依赖能力缝接口；会话格式冻结与迁移测试；跟踪首个 tagged release |
+| DSH 仍处于 pre-release（当前 vendor `0.2.3-alpha.2`），会话格式已演进至 v4 | 平台层代码/存量会话失配 | 锁定版本跟随；平台层只依赖能力缝接口；会话格式冻结与迁移测试；稳定版发布后重新评估 Provider 上游化 |
 | 多用户实例资源成本失控 | 预算超标 | 懒启动 + 空闲回收 + 并发上限；成本看板按实例核算 |
 | RAG 检索质量不达预期 | 员工弃用 | 先做高频小知识库试点；引入重排；把「检索不到」反馈闭环做进产品 |
 | 权限/审批过严或过松（审批原生一次性、无授权存储） | 安全或效率失衡 | 分级预设 + 每 Agent 审批级别 + 平台层授权存储与多级审批 + 试点期调参 |
@@ -305,5 +305,5 @@ JD 中「参与公司大模型应用平台的搭建与迭代（RAG 知识库问�
 - **企业外壳设计**：`.scratch/ai-agent-platform/enterprise-shell.md`（控制面：§3 模块、§4 数据模型、§5 选型、§7 接口契约、§8 开发顺序）
 - **集中评审**：`.scratch/ai-agent-platform/fog-review.md`（Fog 剩余问题的评审材料）
 - **调研报告**：`.scratch/ai-agent-platform/research-report.md`（131 行完整评估，全部结论附包名/路径/README 引文证据）
-- **DSH 源码克隆**：`dsh-source/`（vendor 源码，HEAD = 0.1.3-alpha.1 / `d347e703`，2026-09-05 对齐 tag `dsh-v0.1.3-alpha.1`）
+- **DSH 源码克隆**：`dsh-source/`（vendor 源码，HEAD = 0.2.3-alpha.2 / `4b399c39`，2026-11-22 对齐 tag `dsh-v0.2.3-alpha.2`）
 - 文档基于对 DSH v0.1.0-rc.6（本地安装）与 rc.5（仓库 HEAD）的勘察编写；随 DSH 上游演进需定期复核。技术细节以 DSH README 与源码为准。

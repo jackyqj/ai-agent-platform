@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
-import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import PgSessionPersistence from '@deepseek-ai/dsh-session-persistence-pg'
 import { LIVE_WRITE_BATCH_MAX_DELAY_MS } from '../src/storage.ts'
@@ -81,7 +81,60 @@ describeDb('dsh-session-persistence-pg 聚焦', () => {
       isSeeded: false,
     })
     await handle.append(oneTurnLog())
-    expect((await handle.read(3)).map((event) => event.seq)).toEqual([3, 4, 5])
+    expect((await handle.read(3)).events.map((event) => event.seq)).toEqual([3, 4, 5])
     await handle.close()
+  })
+
+  it('create(parentSource) 复制并持久化完整 fork 历史', async () => {
+    const events = oneTurnLog()
+    const parent = await ctx.sessionPersistence.create({
+      version: SESSION_FORMAT_VERSION,
+      id: SessionId('pg-fork-parent'),
+      createdAt: 1000,
+      isSeeded: false,
+    })
+    await parent.append(events)
+    await parent.close()
+
+    const child = await ctx.sessionPersistence.create({
+      version: SESSION_FORMAT_VERSION,
+      id: SessionId('pg-fork-child'),
+      createdAt: 1001,
+      parentSession: parent.id,
+      isSeeded: false,
+    }, {
+      parentSource: {
+        sessionId: parent.id,
+        endSeq: SessionLogOffset(events.length),
+        events,
+      },
+    })
+    const result = await child.read()
+    expect(result.events.map((event) => event.seq)).toEqual(events.map((event) => event.seq))
+    expect(result.eventState).toBe('shared-frozen')
+    expect(Object.isFrozen(result.events[0])).toBe(true)
+    await child.close()
+
+    const reopened = await ctx.sessionPersistence.open(child.id, 'read')
+    expect((await reopened.read()).events.map((event) => event.seq)).toEqual(events.map((event) => event.seq))
+    await reopened.close()
+  })
+
+  it('create(parentSource) 将空 fork 历史物化为可恢复会话', async () => {
+    const child = await ctx.sessionPersistence.create({
+      version: SESSION_FORMAT_VERSION,
+      id: SessionId('pg-fork-empty'),
+      createdAt: 1000,
+      isSeeded: false,
+    }, {
+      parentSource: {
+        sessionId: SessionId('pg-fork-empty-parent'),
+        endSeq: SessionLogOffset(0),
+        events: [],
+      },
+    })
+    await child.close()
+
+    expect(await ctx.sessionPersistence.stat(child.id)).toBeDefined()
   })
 })

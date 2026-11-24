@@ -9,7 +9,7 @@ The platform-owned extra paths on the DSH prefix, plus the post-pull recipe that
 _Avoid_: vendor copy, keep-list, splice, overlay patch
 
 **DSH prefix**:
-The `dsh-source/` tree that tracks DeepSeek Harness. Extra directories that upstream does not have may sit on it; files that exist upstream may not be hand-edited.
+The `dsh-source/` tree that tracks DeepSeek Harness as a git subtree. Extra directories that upstream does not have may sit on it; files that exist upstream may not be hand-edited.
 _Avoid_: DSH clone, vendored kernel, submodule
 
 **Capability seam** (能力缝):

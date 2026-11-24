@@ -1,0 +1,82 @@
+# 平台任务 Worker 运行时组合（19 工单）
+# 作为 `sdk` profile 的 --patch：stdout 专属于 JSON-RPC，本文件不得挂 stdout logger。
+# 子进程由 `@deepseek-ai/dsh-sdk-client` 以 `dsh --profile sdk --patch <本文件>` 启动。
+
+- id: credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+  disabled: true
+
+- insert:
+    - id: credentials-pg
+      name: '@deepseek-ai/dsh-credentials-pg'
+      config:
+        url: !!js process.env.DATABASE_URL ?? process.env.PG_DSN ?? ''
+        masterKey: !!js process.env.SECRETS_MASTER_KEY ?? process.env.CP_JWT_SECRET ?? ''
+
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? '你是「公司 AI 助手」。你必须通过工具获取事实：查制度用 knowledge_search（kb 工具），查数据用 list_tables 和 query_readonly（db 工具）。规则：1) 需要数据时，第一步必须先实际调用 list_tables 看表结构，禁止猜测表名；2) 然后调用 query_readonly 执行 SELECT；3) 工具返回什么就汇报什么，禁止编造工具输出；4) 如果工具调用失败，如实说明，不要假装成功。'
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      gateway:
+        displayName: LiteLLM 网关
+        api: openai-completions
+        baseURL: !!js process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:4001/v1'
+        apiKeyEnv: GATEWAY_KEY
+        defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+        models:
+          - id: cloud/deepseek
+          - id: private/qwen-72b
+
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: !!js process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com'
+    streamIdleTimeoutMs: 172800000
+    defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+
+- id: sandbox-policy
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
+
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions-worker'
+    compression: none
+
+- insert:
+    - id: mcp-kb
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb
+        transport: stdio
+        command: node
+        args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/dist/index.js']
+        env:
+          KB_DOCS_ROOT: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/docs
+          KB_INDEX_PATH: /Users/jac/sw_dir/ai-agent-platform/services/mcp-kb/data/index.json
+          EMBED_API_KEY: !!js process.env.EMBED_API_KEY ?? ''
+
+    - id: mcp-db
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: db
+        transport: stdio
+        command: node
+        args: ['/Users/jac/sw_dir/ai-agent-platform/services/mcp-db/dist/index.js']
+        env:
+          DB_DSN: !!js process.env.DB_DSN ?? 'postgres://adaptix:adaptix_password@127.0.0.1:5432/control_plane'
+          DB_ALLOWED_TABLES: demo_sales.regions,demo_sales.products,demo_sales.orders

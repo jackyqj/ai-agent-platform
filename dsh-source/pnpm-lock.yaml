@@ -631,9 +631,6 @@ importers:
       '@deepseek-ai/dsh-credentials-local':
         specifier: workspace:*
         version: link:../../packages/credentials/credentials-local
-      '@deepseek-ai/dsh-credentials-pg':
-        specifier: workspace:*
-        version: link:../../packages/credentials/credentials-pg
       '@deepseek-ai/dsh-deepseek-auth':
         specifier: workspace:*
         version: link:../../packages/account/deepseek-auth
@@ -1056,6 +1053,34 @@ importers:
         version: 7.8.0
       tsx:
         specifier: ^4.22.4
+        version: 4.23.13
+
+  apps/task-worker:
+    dependencies:
+      '@deepseek-ai/dsh':
+        specifier: workspace:^
+        version: link:../cli
+      '@deepseek-ai/dsh-credentials-pg':
+        specifier: workspace:^
+        version: link:../../packages/credentials/credentials-pg
+      '@deepseek-ai/dsh-mcp-client':
+        specifier: workspace:^
+        version: link:../../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-sdk-client':
+        specifier: workspace:^
+        version: link:../../packages/sdk/client
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.81.5(supports-color@9.4.0)
+      pg:
+        specifier: ^8.16.3
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.15.5
+        version: 8.23.1
+      tsx:
+        specifier: ^4.19.0
         version: 4.23.13
 
   apps/web:
@@ -15878,34 +15903,6 @@ importers:
       '@deepseek-ai/dsh-user-questions':
         specifier: workspace:*
         version: link:../../interaction/user-questions
-
-  packages/platform/task-worker:
-    dependencies:
-      '@deepseek-ai/dsh':
-        specifier: workspace:^
-        version: link:../../../apps/cli
-      '@deepseek-ai/dsh-credentials-pg':
-        specifier: workspace:^
-        version: link:../../credentials/credentials-pg
-      '@deepseek-ai/dsh-mcp-client':
-        specifier: workspace:^
-        version: link:../../mcp/mcp-client
-      '@deepseek-ai/dsh-sdk-client':
-        specifier: workspace:^
-        version: link:../../sdk/client
-      bullmq:
-        specifier: ^5.0.0
-        version: 5.81.5(supports-color@9.4.0)
-      pg:
-        specifier: ^8.16.3
-        version: 8.23.1
-    devDependencies:
-      '@types/pg':
-        specifier: ^8.15.5
-        version: 8.23.1
-      tsx:
-        specifier: ^4.19.0
-        version: 4.23.13
 
   packages/platform/tool-mcp-visibility:
     dependencies:

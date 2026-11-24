@@ -5,7 +5,7 @@
 | 系统 | `ai-agent-platform`（公司内部 AI Agent 使用平台） |
 | 状态 | 按 **2026-11-22 DSH 升级后的仓库代码** 描述现状，不是远期蓝图 |
 | 读者 | 平台工程师、架构评审、接手维护的 AI 工程师 |
-| 上游内核 | DeepSeek Harness（DSH）`0.2.3-alpha.2`（pre-release），vendor 于 `dsh-source/` |
+| 上游内核 | DeepSeek Harness（DSH）`0.2.3-alpha.2`（pre-release），`dsh-source/` 为 DSH prefix + Vendor overlay |
 | 姊妹文档 | `spec.md`（目标与 ADR）、`enterprise-shell.md`（外壳草图）、`map.md`（决策表）、`STATUS.md`（工单进度）、`RUN-LOCALLY.md`（本地跑通） |
 
 本文档遵循 [arc42](https://arc42.org) 十二章。图一律用 mermaid。与代码冲突时以代码为准；与 `spec.md` 冲突时以 **D22 之后的员工路径** 为准。
@@ -28,7 +28,7 @@
 
 | 优先级 | 质量目标 | 当前代码里的落点 |
 |---|---|---|
-| 1 | **内核可跟随上游** | 平台只依赖能力缝与配置；`dsh-source/` 锁版本 vendor |
+| 1 | **内核可跟随上游** | 平台只依赖能力缝与配置；`dsh-source/` 是 DSH prefix，平台改动只走 Vendor overlay |
 | 2 | **身份与授权可追溯** | 平台 JWT / API Key；写操作走 `audit_events`；审批链落库 |
 | 3 | **执行可隔离** | 员工对话走 JSON-RPC 任务池（D22）；沙箱 `DSH_PERMISSION_MODE` 按角色注入 |
 | 4 | **密钥不散落** | `credential_secrets` AES-256-GCM；LiteLLM 配置只引用 env |
@@ -167,7 +167,7 @@ flowchart TB
   GW -.->|"可选 GPU"| VLLM["vLLM :8000"]
 ```
 
-**范围以内**：`apps/control-plane`、`web/store`、`services/mcp-*`、`configs/`、`dsh-source/packages/platform/task-worker`、平台自有缝 `session-persistence-pg` / `credentials-pg`、公司 preset 与 profile。
+**范围以内**：`apps/control-plane`、`web/store`、`services/mcp-*`、`configs/`、`dsh-source/apps/task-worker`、平台自有缝 `session-persistence-pg` / `credentials-pg`、公司 preset 与 profile。
 
 **范围以外**：DSH 内核实现（只当黑盒运行时）、模型训练、对象存储附件（设计有、本轮对话路径未接 S3）、OTel 公司日志平台对接（导出器在 DSH，平台 collector 未作为一等公民部署）。
 
@@ -182,8 +182,9 @@ ai-agent-platform/
   configs/gateway/             LiteLLM compose + 路由
   configs/company-profile/     公司 DSH profile 源
   .dsh-home/presets-company/   运行时 preset 根
-  dsh-source/                  vendor DSH + 平台耦合包
-    packages/platform/task-worker/
+  dsh-source/                  DSH prefix + Vendor overlay
+    apps/task-worker/
+    packages/platform/tool-mcp-visibility/
     packages/session/session-persistence-pg/
     packages/credentials/credentials-pg/
 ```
@@ -318,7 +319,7 @@ Vite + React 单页。路由靠 hash：`store` / `chat` / `admin` / `skills`。`
 
 ### 5.4 任务 Worker 与 DSH 运行时
 
-独立进程 `dsh-source/packages/platform/task-worker/src/worker.ts`：
+独立进程 `dsh-source/apps/task-worker/src/worker.ts`：
 
 1. 消费 Redis 队列 `agent-tasks`
 2. 读 PG `tasks` 行，解析 `payload.task` / `permissionMode` / `sessionId`
@@ -598,7 +599,7 @@ flowchart TB
 |---|---|---|
 | 控制面 | `127.0.0.1:4000` | `apps/control-plane`：`tsc` 后 `node dist/main.js`（不要用 tsx 跑 Nest，缺 decorator metadata） |
 | 商店 | `:5377`（Vite） | `web/store` `npm run dev` |
-| Worker | 无 HTTP | `dsh-source/packages/platform/task-worker` `tsx src/worker.ts` |
+| Worker | 无 HTTP | `dsh-source/apps/task-worker` `tsx src/worker.ts` |
 | LiteLLM | 宿主 `4001` | `configs/gateway` podman-compose |
 | vLLM | `8000` | 需 NVIDIA CDI；macOS 不起，只配 `VLLM_BASE_URL` |
 | mcp-kb HTTP | `8787` 可选 | `--http` |
@@ -708,7 +709,7 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | D4 | RAG 为 MCP，不进内核 | `services/mcp-kb` |
 | D5 | 共享 SessionPersistence → PG | `dsh-session-persistence-pg` |
 | D6 | Agent = preset + 商店目录 | `agents` + `.dsh-home/presets-company` |
-| D7 | 只依赖能力缝 | vendor `dsh-source`，平台包在 `packages/platform` 等 |
+| D7 | 只依赖能力缝 | DSH prefix `dsh-source`；平台 adapter 只以 extra 目录出现（Vendor overlay） |
 | D8 | 钉钉 OIDC 首发 | `AuthService` 硬编码钉钉 URL |
 | D9 | NestJS + Fastify | `main.ts` |
 | D10 | Docker/podman 起步 | `ContainerOrchestrator` |
@@ -783,7 +784,8 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 |---|---|
 | **DSH** | DeepSeek Harness，Agent 运行时内核 |
 | **Cordis** | DSH 的插件框架：服务、事件、可逆 effect |
-| **能力缝** | Service Definition + Provider + Consumer；例如 SessionPersistence、Credentials |
+| **能力缝** | DSH 提供的可替换槽；例如 SessionPersistence、Credentials。见根目录 `GLOSSARY.md` |
+| **Vendor overlay** | prefix 上的 extra 目录 + pull 后的 `deps/overlay.sh`；禁止手改上游已有文件 |
 | **Preset** | 一个 Agent 产品：目录内 `preset.yml` + `agent.cordis.yml` |
 | **逻辑 RPC 会话** | 控制面 `sessions` 行，`type=rpc`，作为商店多轮的 `session_id`，不对应容器 |
 | **Web 实例 / 工作室** | 每用户 DSH Web 容器；本轮无产品入口 |

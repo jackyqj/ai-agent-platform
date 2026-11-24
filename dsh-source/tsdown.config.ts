@@ -20,9 +20,7 @@ function isBuildFaceClient(value: unknown): boolean {
  */
 export default defineConfig(({ env }) => {
   const client = isBuildFaceClient(env?.DSH_BUILD_FACE)
-  const manifests = globSync(['vendor/*/package.json', 'packages/*/*/package.json'], { cwd: import.meta.dirname })
-    .filter(path => !path.startsWith('packages/platform/'))
-  const packages = workspacePackageGlobs(manifests)
+  const packages = workspacePackageGlobs(globSync(['vendor/*/package.json', 'packages/*/*/package.json'], { cwd: import.meta.dirname }))
   return {
     workspace: [...packages, 'apps/cli', ...client ? [] : ['apps/desktop-host']],
     entry: client ? '' : ['lib/types/{index,startup}.js'],

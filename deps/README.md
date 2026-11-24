@@ -1,35 +1,57 @@
-# DSH 源码 vendor（deps）
+# DSH prefix 与 Vendor overlay
 
-`dsh-source/` 是 **DeepSeek Harness 上游源码的 vendor 副本**，当前对齐 `0.2.3-alpha.2`（2026-11-22 从 tag `dsh-v0.2.3-alpha.2` 覆盖；指针见 `dsh-source/VENDOR.md`）。该版本为预发布版。
+`dsh-source/` 是 DeepSeek Harness 的 **DSH prefix**，当前对齐 `0.2.3-alpha.2`（指针见 `dsh-source/VENDOR.md`）。平台自有代码是 **Vendor overlay**：只以 extra 目录出现，禁止手改上游已有文件。词汇见根目录 [GLOSSARY.md](../GLOSSARY.md)。
 
-## 为什么 vendor 进本仓库
+包必须留在 DSH pnpm workspace（`packages/*/*` 或 `apps/*`）。迁出 + 符号链接已在 pnpm/vitest 上失败。
 
-| 组件 | 位置 | 说明 |
-|---|---|---|
-| 任务 Worker | `dsh-source/packages/platform/task-worker/` | 平台自有（D21）：BullMQ 消费端 + TS SDK 驱动 DSH 运行时；依赖 `workspace:^` 的 `@deepseek-ai/dsh-*` 包，须在 workspace 上下文解析 |
-| PG 会话持久化 Provider | `dsh-source/packages/session/session-persistence-pg/` | 平台自有（D21）：PG SessionPersistence；依赖 workspace 包 + 共享测试契约（`session-persistence/tests/contract.ts`），测试须在工作区跑 |
-| PG 凭据 Provider | `dsh-source/packages/credentials/credentials-pg/` | 平台自有（D20）：`ctx.credentials` 读 vault 或 HTTP resolve，按请求解析 |
+## Extra 目录
 
-两组件曾尝试迁出 + 符号链接，pnpm/vitest 按真实路径解析导致 `bullmq` 找不到、`tsconfig not found`。
-**vendor 整树是唯一可靠方式**：单仓库 clone 即跑、版本随平台 commit 固化、协作/CI 只拉一个仓库。
+| 路径 | 说明 |
+|---|---|
+| `dsh-source/apps/task-worker/` | 平台任务 Worker（D21）：BullMQ 消费端 + TS SDK；`apps/*` 在 workspace 内且不进 tsdown glob |
+| `dsh-source/packages/platform/tool-mcp-visibility/` | MCP 可见性插件；包名为 `@deepseek-ai/dsh-tool-mcp-visibility` 以便 `gen-tsconfig-paths` 写入 generated region |
+| `dsh-source/packages/session/session-persistence-pg/` | PG SessionPersistence adapter（能力缝，挨着 JSONL/SQLite sibling） |
+| `dsh-source/packages/credentials/credentials-pg/` | PG 凭据 adapter（D20）；不改组 README |
 
-## 上游与升级
+## Overlay recipe
 
-- 上游：https://github.com/deepseek-ai/deepseek-harness（当前 vendor 对应 `0.2.3-alpha.2` / `4b399c39`，指针见 `dsh-source/VENDOR.md`）
-- 平台改动（相对上游）：`packages/platform/task-worker/`、`packages/session/session-persistence-pg/`、
-  `packages/credentials/credentials-pg/`、`apps/cli/package.json`、`tsconfig.host.json` / `tsconfig.base.json`（平台引用与 alias）、`tsdown.config.ts`（排除 `packages/platform`）、Worker 的网关路由配置。`allowBuilds.msgpackr-extract: false` 已由当前上游提供。
-- **升级流程**：满足 DSH Node `^24.22.3 || >=26.13.1` 与 pnpm `11.28.5` → 拉取上游新 commit → 覆盖 `dsh-source/`（保留平台组件与本地改动）→ 全量 build/test →
-  按 `deps/README.md` 旧版策略处理接口变化。未来可转 `git subtree pull`（需先给 dsh 历史补 remote）。
+`subtree pull` 之后在仓库根跑：
+
+```sh
+./deps/overlay.sh
+```
+
+它只做 `pnpm install` 和 `pnpm run gen-tsconfig-paths`。lockfile 与 `tsconfig.base.json` 的 generated region 会相对上游变脏，这是 overlay 的 implementation。
+
+不要手改 `apps/cli/package.json`、`tsconfig.host.json`、`tsdown.config.ts`、组 README、`scripts/verify-package-readme-model-experience.ts`。不要跑 `gen-doc-graphs` 当产品门禁。源码 `dsh` + tsx worker 是这一阶段的运行时；extra 包不进 `tsconfig.host.json`，所以 prefix 上的 `pnpm build` 不是 overlay 门禁。built `dsh` 若以后要解析平台插件，装到 `.dsh-home` profile，仍不碰 CLI manifest。
+
+## 转 subtree（一次性）
+
+prefix 已存在且没有 git-subtree 记录。转换顺序：
+
+1. 完成本 overlay（extra 目录 + 上游文件恢复为手改前）
+2. 把 extra 目录挪出 `dsh-source/`
+3. 删除 `dsh-source/`
+4. `git remote add dsh https://github.com/deepseek-ai/deepseek-harness.git`（若尚未添加）
+5. `git fetch dsh tag dsh-v0.2.3-alpha.2`
+6. `git subtree add --prefix=dsh-source --squash dsh dsh-v0.2.3-alpha.2`
+7. extra 目录放回，跑 `./deps/overlay.sh`
+
+之后升级走 `git subtree pull --prefix=dsh-source --squash dsh <tag>`，再 overlay。
+
+`git subtree add` 会生成 commit，需要单独执行。
 
 ## 终局路径（不变）
 
-DSH 发布稳定版（接口冻结、npm 安装形态）后，两组件重新打包为平台仓库中的
-out-of-tree 插件（`dsh plugin` 安装到 profile），届时脱离 workspace，`dsh-source/` 可冻结或移除。
+DSH 发布稳定版（接口冻结、npm 安装形态）后，adapter 重新打包为平台仓库中的 out-of-tree 插件（`dsh plugin` 安装到 profile），届时脱离 workspace，`dsh-source/` 可冻结或移除。
 
 ## 本地开发提示
 
-- 改 Worker/Provider → 直接改 `dsh-source/packages/platform/task-worker/`、`dsh-source/packages/session/session-persistence-pg/` 或 `dsh-source/packages/credentials/credentials-pg/`
+- 改 Worker → `dsh-source/apps/task-worker/`
+- 改 MCP 可见性 → `dsh-source/packages/platform/tool-mcp-visibility/`
+- 改 PG adapter → `dsh-source/packages/session/session-persistence-pg/` 或 `dsh-source/packages/credentials/credentials-pg/`
 - Provider 测试：`cd dsh-source && DATABASE_URL=... pnpm vitest run packages/session/session-persistence-pg --fileParallelism=false`
 - 凭据 Provider：`cd dsh-source && pnpm vitest run packages/credentials/credentials-pg`
-- Worker：`cd dsh-source/packages/platform/task-worker && ./node_modules/.bin/tsx src/worker.ts`
-- DSH_HOME：`/Users/jac/sw_dir/ai-agent-platform/.dsh-home`（presets-company/profiles 入库，sessions 运行态不入库）
+- MCP 可见性：`cd dsh-source && pnpm vitest run packages/platform/tool-mcp-visibility`
+- Worker：`cd dsh-source/apps/task-worker && ./node_modules/.bin/tsx src/worker.ts`
+- DSH_HOME：仓库内 `.dsh-home`（presets-company/profiles 入库，sessions 运行态不入库）

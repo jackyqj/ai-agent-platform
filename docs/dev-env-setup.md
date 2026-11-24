@@ -56,7 +56,7 @@ DSH_HOME=$PWD/../.dsh-home pnpm dsh --profile headless "task text"
 - `pnpm run build` 的 10 个 gate 全部通过；最终代码另经 `pnpm run typecheck` 的 5 个 gate 验证。
 - PG Session Provider 测试 35/35、PG Credentials Provider 测试 16/16、Worker 测试 2/2 通过；数据库测试仅使用 `dsh_pg_test`，并仅在该测试库应用 `006_secrets.sql`。
 - 公司 profile 与 SDK Worker patch 的 `--dump-config` 均验证了 PG 凭据提供方、MCP 插件及模型路由组合；未执行真实模型调用。
-- 文档链接、换行和两个凭据 README 与 Session PG README 的双语配对检查通过。`verify-package-readme-model-experience` 仍报告 `packages/platform/task-worker/README.md` 与 `packages/platform/tool-mcp-visibility/README.md` 缺失。
+- 文档链接、换行和两个凭据 README 与 Session PG README 的双语配对检查通过。DSH `verify-package-readme-model-experience` 不是平台门禁（Worker 已迁到 `apps/task-worker/`，不走该 glob）。
 - 旧版 PG 会话仍保留在数据库中，但 v4 Provider 会拒绝读取 v2 格式；本次未执行数据库迁移。
 
 ## 待办（需人类/凭据）

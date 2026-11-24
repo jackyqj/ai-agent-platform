@@ -100,7 +100,7 @@ curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/chat/completions \
 ## 4. 启动任务 Worker（真实执行 Agent 任务）
 
 ```sh
-cd dsh-source/packages/platform/task-worker   # dsh-source 为仓库内 vendor 源码
+cd dsh-source/apps/task-worker   # DSH prefix 上的 Vendor overlay（见 GLOSSARY.md）
 export DSH_HOME="$REPO_ROOT/.dsh-home"
 export DATABASE_URL="$PG_DSN"
 # cloud/* 与 private/* 经 LiteLLM gateway；其他模型 id 使用官方 DeepSeek route。

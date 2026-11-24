@@ -1,7 +1,7 @@
 // 手动冒烟：TS SDK client 驱动 sdk profile + worker patch + 知识库工具
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
 
-const cordis = new URL('../../../../packages/platform/task-worker/worker.cordis.yml', import.meta.url).pathname
+const cordis = new URL('../worker.cordis.yml', import.meta.url).pathname
 
 await using harness = new DeepSeekHarness({
   profile: 'sdk',

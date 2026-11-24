@@ -459,7 +459,6 @@
       "@deepseek-ai/dsh-ptc-runtime-node/configuration": ["./packages/ptc-runtime/ptc-runtime-node/src/configuration.ts"],
       "@deepseek-ai/dsh-message-feedback/types": ["./packages/feedback/message-feedback/src/types.ts"],
       "@deepseek-ai/dsh-webhook/types": ["./packages/experimental/webhook/src/types.ts"],
-      "@company/dsh-tool-mcp-visibility": ["./packages/platform/tool-mcp-visibility/src"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
@@ -645,6 +644,7 @@
       "@deepseek-ai/dsh-tool-goal": ["./packages/goal/tool-goal/src"],
       "@deepseek-ai/dsh-tool-jobs": ["./packages/jobs/tool-jobs/src"],
       "@deepseek-ai/dsh-tool-lsp": ["./packages/lsp/tool-lsp/src"],
+      "@deepseek-ai/dsh-tool-mcp-visibility": ["./packages/platform/tool-mcp-visibility/src"],
       "@deepseek-ai/dsh-tool-office": ["./packages/document/tool-office/src"],
       "@deepseek-ai/dsh-tool-present": ["./packages/deliverables/tool-present/src"],
       "@deepseek-ai/dsh-tool-pwsh-persistent": ["./packages/shell/tool-pwsh-persistent/src"],

@@ -1,5 +1,5 @@
 {
-  "name": "@company/dsh-tool-mcp-visibility",
+  "name": "@deepseek-ai/dsh-tool-mcp-visibility",
   "description": "平台 MCP 工具可见性过滤插件（编排决策 6）：按 serverName 白名单 deny 其它 mcp__ 工具",
   "version": "0.1.0",
   "private": true,

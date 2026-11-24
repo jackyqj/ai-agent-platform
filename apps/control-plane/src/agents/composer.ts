@@ -10,8 +10,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]*$/
 
 // 平台自建插件（spike 结论）：在 preset scope 内用 ctx.tools.restrict() 按
 // serverName 白名单过滤 host 层 mcp-client 注册的 mcp__<server>__<raw> 工具。
-// 包名占位，实现落地到 dsh-source/packages/platform/（见 §5 实现 4 修订）。
-const MCP_VISIBILITY_PLUGIN = '@company/dsh-tool-mcp-visibility'
+// 包名遵循 DSH 生成器约定（@deepseek-ai/dsh-<目录>）；所有权仍是 D21 / Vendor overlay。
+const MCP_VISIBILITY_PLUGIN = '@deepseek-ai/dsh-tool-mcp-visibility'
 const SKILL_FILESYSTEM_PLUGIN = '@deepseek-ai/dsh-skill-filesystem'
 const TOOL_SKILL_PLUGIN = '@deepseek-ai/dsh-tool-skill'
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/

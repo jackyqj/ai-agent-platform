@@ -33,7 +33,7 @@ spec ADR-1：自动化任务跑在 JSON-RPC 运行时池——常驻 DSH 运行�
 
 > 2025-08-18：**队列闭环完成并端到端实测**。
 > - 控制面：`src/tasks/`（生产端）——BullMQ 队列 + tasks 表（PG，002 迁移）+ `POST /api/service/trigger`（API Key + scope=task:create）
-> - Worker 独立进程：`dsh-source/packages/platform/task-worker/`——TS SDK（`@deepseek-ai/dsh-sdk-client`）拉起 `dsh-jsonrpc-agent` bin + `worker.cordis.yml`（公司 persona/知识库 MCP/NVIDIA 模型）
+> - Worker 独立进程：`dsh-source/apps/task-worker/`——TS SDK（`@deepseek-ai/dsh-sdk-client`）拉起 `dsh-jsonrpc-agent` bin + `worker.cordis.yml`（公司 persona/知识库 MCP/NVIDIA 模型）
 > - 实测：API key 触发「查报销餐费上限」→ queued → worker 执行 → done（模型答出加班餐补 80 元等）；审计链 task.triggered → submitted → completed 齐全
 > - 踩坑：pnpm allowBuilds 策略需批 `msgpackr-extract: false`（pnpm-workspace.yaml 已加）；SDK env 在 launch 内传
 >

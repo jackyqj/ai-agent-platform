@@ -72,7 +72,7 @@ test('compile: IR 行顺序固定为 persona → model → mcp-visibility', () =
   assert.deepEqual(graph.rows.map(r => r.name), [
     '@deepseek-ai/dsh-persona',
     '@deepseek-ai/dsh-agent-default-model',
-    '@company/dsh-tool-mcp-visibility',
+    '@deepseek-ai/dsh-tool-mcp-visibility',
   ])
 })
 

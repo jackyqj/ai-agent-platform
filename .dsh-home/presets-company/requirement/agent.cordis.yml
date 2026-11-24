@@ -38,6 +38,6 @@
     provider: deepseek-official
     model: deepseek-ai/deepseek-v4-flash-0731
 - id: mcp-visibility
-  name: "@company/dsh-tool-mcp-visibility"
+  name: "@deepseek-ai/dsh-tool-mcp-visibility"
   config:
     allowedServers: []

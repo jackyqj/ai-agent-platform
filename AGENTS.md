@@ -3,7 +3,7 @@
 ## 适用范围与代码归属
 
 - 本指引适用于整个仓库。修改 `dsh-source/` 时，还须遵循其中的 [AGENTS.md](dsh-source/AGENTS.md)。
-- 修改 `dsh-source/` 前，先阅读 [deps/README.md](deps/README.md)。保留其中的平台自有组件；更新上游代码时遵循文档所述的 vendor 同步流程。
+- 修改 `dsh-source/` 前，先阅读 [deps/README.md](deps/README.md)。平台改动只以 extra 目录出现（Vendor overlay）；禁止手改上游已有文件。升级走 subtree pull + `deps/overlay.sh`。
 - 优先在平台服务和集成层实现平台行为；仅在任务确有需要时修改 DSH 内部实现。
 - 将授权、审批、数据路由和密钥处理视为服务端控制。保持默认拒绝；不得在日志、响应、测试夹具或文档中暴露密钥明文。
 

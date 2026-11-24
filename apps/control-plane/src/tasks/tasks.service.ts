@@ -1,5 +1,5 @@
 // 任务队列生产端（19 工单）：API → tasks 表(queued) → Redis 队列
-// 消费端是独立 Worker 进程（dsh-source/packages/platform/task-worker/src/worker.ts）
+// 消费端是独立 Worker 进程（dsh-source/apps/task-worker/src/worker.ts）
 import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common'
 import { Queue } from 'bullmq'
 import { randomUUID } from 'node:crypto'

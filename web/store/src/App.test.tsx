@@ -133,7 +133,7 @@ async function loginAs(client: Client, user = userEvent.setup()) {
   render(<App client={client} />);
   await expandDevLogin(user);
   await user.click(screen.getByRole('button', { name: '登录' }));
-  await waitFor(() => expect(screen.getByText('助手商店')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('今天想让森米帮你做什么？')).toBeInTheDocument());
   return user;
 }
 
@@ -172,7 +172,7 @@ describe('App', () => {
     await user.clear(screen.getByPlaceholderText(/用户 id/));
     await user.type(screen.getByPlaceholderText(/用户 id/), 'u-admin');
     await user.click(screen.getByRole('button', { name: '登录' }));
-    await waitFor(() => expect(screen.getByText('助手商店')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('今天想让森米帮你做什么？')).toBeInTheDocument());
     expect(client.devLogin).toHaveBeenCalledWith('u-admin');
   });
 
@@ -205,8 +205,8 @@ describe('App', () => {
       listAgents: vi.fn(async () => ({ agents: [assistant] })),
     });
     const user = await loginAs(client);
-    await user.click(screen.getByRole('button', { name: '开始对话' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '开始使用' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '回市集' })).toBeInTheDocument());
     expect(client.createSession).toHaveBeenCalledWith('assistant');
     expect(screen.getByRole('heading', { name: '通用助手' })).toBeInTheDocument();
     expect(screen.queryByText(/密钥/)).not.toBeInTheDocument();
@@ -222,8 +222,8 @@ describe('App', () => {
       })),
     });
     const user = await loginAs(client);
-    await user.click(screen.getByRole('button', { name: '开始对话' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '开始使用' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '回市集' })).toBeInTheDocument());
     expect(client.createSession).not.toHaveBeenCalled();
   });
 
@@ -235,7 +235,7 @@ describe('App', () => {
       }),
     });
     const user = await loginAs(client);
-    await user.click(screen.getByRole('button', { name: '开始对话' }));
+    await user.click(screen.getByRole('button', { name: '开始使用' }));
     await waitFor(() => expect(screen.getByText(/实例还没起来，请稍后重试/)).toBeInTheDocument());
     expect(screen.queryByText(/密钥/)).not.toBeInTheDocument();
   });
@@ -250,7 +250,7 @@ describe('App', () => {
     const user = await loginAs(client);
     expect(screen.getByText('我的对话')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /继续.*通用助手/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '返回商店' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: '回市集' })).toBeInTheDocument());
     expect(client.createSession).not.toHaveBeenCalled();
   });
 

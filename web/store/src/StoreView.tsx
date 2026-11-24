@@ -9,17 +9,17 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
   return (
     <div className="store">
       <header className="store-hero">
-        <p className="eyebrow">企业试点 · 助手调度</p>
-        <h1>助手商店</h1>
-        <p className="lead">挑选已上架的 AI 助手开始对话。进行中的会话与待办审批在侧栏，定时任务在下方管理。</p>
+        <p className="eyebrow">市集 · 发现</p>
+        <h1>今天想让森米帮你做什么？</h1>
+        <p className="lead">从市集挑一个 Agent，点开始使用就会开一条新对话。进行中的会话与待办审批在侧栏。</p>
       </header>
 
       <div className={'store-layout' + (hasSidebar ? '' : ' store-layout--solo')}>
         <main className="store-main">
           <section className="section">
-            <SectionTitle title="可用助手" meta={state.agents.length ? `${state.agents.length} 个` : undefined} />
+            <SectionTitle title="可用 Agent" meta={state.agents.length ? `${state.agents.length} 个` : undefined} />
             {state.agents.length === 0 ? (
-              <Empty>暂无可用助手。若刚上架请刷新，或请管理员开通可见范围。</Empty>
+              <Empty>暂无可用 Agent。若刚上架请刷新，或请管理员开通可见范围。</Empty>
             ) : (
               <div className="agents">
                 {state.agents.map((a, i) => <AgentCard key={a.id} a={a} index={i} state={state} act={act} />)}
@@ -188,6 +188,7 @@ function GraphCard({ g, index, state, act }: { g: GraphProduct; index: number; s
   const task = state.graphTask[g.id] ?? '';
   return (
     <article className="agent motion-item" style={{ animationDelay: `${Math.min(index, 8) * 0.06}s` }}>
+      <div className="agent-avatar" aria-hidden="true">🔗</div>
       <header className="agent-head">
         <h3>{g.name}</h3>
         <div className="meta">
@@ -208,10 +209,19 @@ function GraphCard({ g, index, state, act }: { g: GraphProduct; index: number; s
   );
 }
 
+const AVATARS = ['📖', '🎧', '✨', '🧪', '💬', '🏃', '📋', '🔍'];
+
+function agentAvatar(id: string): string {
+  let n = 0;
+  for (const c of id) n += c.charCodeAt(0);
+  return AVATARS[n % AVATARS.length];
+}
+
 function AgentCard({ a, index, state, act }: { a: Agent; index: number; state: AppState; act: Actions }) {
   const busy = state.agentBusy[a.id];
   return (
     <article className="agent motion-item" style={{ animationDelay: `${Math.min(index, 8) * 0.06}s` }}>
+      <div className="agent-avatar" aria-hidden="true">{agentAvatar(a.id)}</div>
       <header className="agent-head">
         <h3>{a.name}</h3>
         <div className="meta">
@@ -226,7 +236,7 @@ function AgentCard({ a, index, state, act }: { a: Agent; index: number; state: A
       </header>
       <p className="desc">{a.description}</p>
       <div className="foot">
-        <button disabled={!!busy} onClick={() => void act.startChat(a.id)}>{busy ? '正在打开…' : '开始对话'}</button>
+        <button className="use" disabled={!!busy} onClick={() => void act.startChat(a.id)}>{busy ? '正在打开…' : '开始使用'}</button>
       </div>
     </article>
   );

@@ -1,4 +1,4 @@
-/** 登录页插图：调度台信号拓扑 — 中心平台与助手节点之间的脉冲链路 */
+/** 登录页插图：森米工作台信号拓扑 — 中心平台与助手节点之间的脉冲链路 */
 export default function LoginIllustration() {
   return (
     <div className="login-art" aria-hidden="true">
@@ -63,7 +63,7 @@ export default function LoginIllustration() {
         </g>
 
         <text x="180" y="268" textAnchor="middle" fill="var(--text-faint)" fontSize="11" fontFamily="var(--font-mono)" letterSpacing="0.12em">
-          DISPATCH DESK
+          SENMI WORKBENCH
         </text>
       </svg>
     </div>

@@ -25,21 +25,17 @@
 
 不要手改 `apps/cli/package.json`、`tsconfig.host.json`、`tsdown.config.ts`、组 README、`scripts/verify-package-readme-model-experience.ts`。不要跑 `gen-doc-graphs` 当产品门禁。源码 `dsh` + tsx worker 是这一阶段的运行时；extra 包不进 `tsconfig.host.json`，所以 prefix 上的 `pnpm build` 不是 overlay 门禁。built `dsh` 若以后要解析平台插件，装到 `.dsh-home` profile，仍不碰 CLI manifest。
 
-## 转 subtree（一次性）
+## Subtree 记录
 
-prefix 已存在且没有 git-subtree 记录。转换顺序：
+`dsh-source/` 已是 tag `dsh-v0.2.3-alpha.2` 的 squash subtree（`git log --grep="Squashed 'dsh-source"`）。升级：
 
-1. 完成本 overlay（extra 目录 + 上游文件恢复为手改前）
-2. 把 extra 目录挪出 `dsh-source/`
-3. 删除 `dsh-source/`
-4. `git remote add dsh https://github.com/deepseek-ai/deepseek-harness.git`（若尚未添加）
-5. `git fetch dsh tag dsh-v0.2.3-alpha.2`
-6. `git subtree add --prefix=dsh-source --squash dsh dsh-v0.2.3-alpha.2`
-7. extra 目录放回，跑 `./deps/overlay.sh`
+```sh
+git fetch https://github.com/deepseek-ai/deepseek-harness.git tag <tag>
+git subtree pull --prefix=dsh-source --squash FETCH_HEAD
+./deps/overlay.sh
+```
 
-之后升级走 `git subtree pull --prefix=dsh-source --squash dsh <tag>`，再 overlay。
-
-`git subtree add` 会生成 commit，需要单独执行。
+不必 `git remote add`（避免改仓库 config）。
 
 ## 终局路径（不变）
 

@@ -4,7 +4,7 @@
 
 默认打进员工现有 **web** profile（`dsh web` / 端口 3080）。公司内部 `company` profile 同样可用。
 
-客户端入口：终端 `dsh-biene`、聊天框 `/biene sync`，以及侧栏底「小彼恩」面板（看状态 / 应用 / 更新）。钉钉回调域名是商店前端，复制 `#token=` 即可（控制面 OIDC redirect 不指向本机端口）。
+客户端入口：终端 `dsh-biene`、聊天框 `/biene sync`，以及侧栏底「小彼恩」面板（看状态 / 应用 / 更新）。插件同时填充 `sidebar.brand.mark` / `sidebar.brand.name`（彼字标 +「小彼恩dsh」），不改 DSH `--dsw-*` 设计系统。钉钉回调域名是商店前端，复制 `#token=` 即可（控制面 OIDC redirect 不指向本机端口）。
 
 登录仍在终端。面板不持 JWT，只请求本机 dsh 的 `GET /bienen/status` 与 `POST /bienen/apply`。冲突项不会被面板覆盖（终端加 `--force`）。
 

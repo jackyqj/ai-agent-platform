@@ -5,7 +5,7 @@
 | 系统 | `ai-agent-platform`（公司内部 AI Agent 使用平台） |
 | 状态 | 按 **2026-11-22 DSH 升级后的仓库代码** 描述现状，不是远期蓝图 |
 | 读者 | 平台工程师、架构评审、接手维护的 AI 工程师 |
-| 上游内核 | DeepSeek Harness（DSH）`0.2.3-alpha.2`（pre-release），`dsh-source/` 为 DSH prefix + Vendor overlay |
+| 上游内核 | DeepSeek Harness（DSH）`0.2.3-alpha.2`（pre-release），`dsh-source/` 为 git subtree + Vendor overlay |
 | 姊妹文档 | `spec.md`（目标与 ADR）、`enterprise-shell.md`（外壳草图）、`map.md`（决策表）、`STATUS.md`（工单进度）、`RUN-LOCALLY.md`（本地跑通） |
 
 本文档遵循 [arc42](https://arc42.org) 十二章。图一律用 mermaid。与代码冲突时以代码为准；与 `spec.md` 冲突时以 **D22 之后的员工路径** 为准。
@@ -28,7 +28,7 @@
 
 | 优先级 | 质量目标 | 当前代码里的落点 |
 |---|---|---|
-| 1 | **内核可跟随上游** | 平台只依赖能力缝与配置；`dsh-source/` 是 DSH prefix，平台改动只走 Vendor overlay |
+| 1 | **内核可跟随上游** | 平台只依赖能力缝与配置；`dsh-source/` 是 git subtree，平台改动只走 Vendor overlay |
 | 2 | **身份与授权可追溯** | 平台 JWT / API Key；写操作走 `audit_events`；审批链落库 |
 | 3 | **执行可隔离** | 员工对话走 JSON-RPC 任务池（D22）；沙箱 `DSH_PERMISSION_MODE` 按角色注入 |
 | 4 | **密钥不散落** | `credential_secrets` AES-256-GCM；LiteLLM 配置只引用 env |
@@ -176,13 +176,13 @@ flowchart TB
 ```
 ai-agent-platform/
   apps/control-plane/          企业外壳 API（NestJS）
-  web/store/                   商店 / 对话 / 管理 / Skill
+  web/store/                   市集 / 对话 / 管理 / Skill
   services/mcp-kb/             知识库 MCP
   services/mcp-db/             只读库 MCP
   configs/gateway/             LiteLLM compose + 路由
   configs/company-profile/     公司 DSH profile 源
   .dsh-home/presets-company/   运行时 preset 根
-  dsh-source/                  DSH prefix + Vendor overlay
+  dsh-source/                  git subtree + Vendor overlay
     apps/task-worker/
     packages/platform/tool-mcp-visibility/
     packages/session/session-persistence-pg/
@@ -309,7 +309,7 @@ Vite + React 单页。路由靠 hash：`store` / `chat` / `admin` / `skills`。`
 
 | 视图 | 作用 |
 |---|---|
-| `StoreView` | Agent / 组合图目录，开始对话 |
+| `StoreView` | Agent 市集 / 组合图目录，开始使用 |
 | `ChatView` | 多轮：`createSession` + `submitTask(sessionId)`，用任务结果拼消息 |
 | `AdminView` | 工作台 / 配置 / 知识库 / 调查 |
 | `SkillStoreView` | Skill 市场 |
@@ -709,7 +709,7 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | D4 | RAG 为 MCP，不进内核 | `services/mcp-kb` |
 | D5 | 共享 SessionPersistence → PG | `dsh-session-persistence-pg` |
 | D6 | Agent = preset + 商店目录 | `agents` + `.dsh-home/presets-company` |
-| D7 | 只依赖能力缝 | DSH prefix `dsh-source`；平台 adapter 只以 extra 目录出现（Vendor overlay） |
+| D7 | 只依赖能力缝 | DSH prefix `dsh-source`（git subtree）；平台 adapter 只以 extra 目录出现（Vendor overlay） |
 | D8 | 钉钉 OIDC 首发 | `AuthService` 硬编码钉钉 URL |
 | D9 | NestJS + Fastify | `main.ts` |
 | D10 | Docker/podman 起步 | `ContainerOrchestrator` |

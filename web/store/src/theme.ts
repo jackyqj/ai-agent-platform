@@ -1,5 +1,5 @@
 // 亮/暗主题读写。localStorage 在无痕模式、受限 origin、以及未启用
-// --localstorage-file 的 Node/测试环境下可能抛错，全部 try/catch 兜底暗色。
+// --localstorage-file 的 Node/测试环境下可能抛错，全部 try/catch 兜底亮色（森米工作台默认奶油底）。
 
 export type Theme = 'dark' | 'light';
 
@@ -7,9 +7,9 @@ const KEY = 'theme';
 
 export function readTheme(): Theme {
   try {
-    return localStorage.getItem(KEY) === 'light' ? 'light' : 'dark';
+    return localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 

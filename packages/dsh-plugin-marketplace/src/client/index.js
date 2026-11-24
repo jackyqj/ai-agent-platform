@@ -1,12 +1,17 @@
 import { createElement as h, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { badgeCount, loginCommand, rowAction, stateLabel } from '../panel-model.js'
 
+const XB_MARK = '#ef5b2b'
+
 const CSS = `
 .bienen-layer{position:relative;flex:none;display:flex;align-items:center;width:100%;height:42px;margin:8px 0 0}
-.bienen-trigger{display:inline-flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:0 -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;cursor:pointer;overflow:hidden}
-.bienen-trigger:hover,.bienen-trigger[data-active]{background:var(--dsw-alias-interactive-bg-hover)}
+.bienen-trigger{display:inline-flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:0 -2px;padding:0 10px 0 8px;border:none;border-radius:10px;background:var(--dsw-specific-menu,#fff);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer;overflow:hidden;box-shadow:0 0 0 1px var(--dsw-alias-border-l1,#e5e5e5)}
+.bienen-trigger:hover,.bienen-trigger[data-active]{background:#fff7ed;box-shadow:0 0 0 1px #fdba74}
+.bienen-dotn{width:16px;height:16px;border-radius:999px;background:${XB_MARK};color:#fff;font-size:9px;display:grid;place-items:center;font-weight:700;flex:none}
 .bienen-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bienen-count{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-label-primary-foreground,#fff);font-size:11px;line-height:18px;text-align:center}
+.bienen-count{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:${XB_MARK};color:#fff;font-size:11px;line-height:18px;text-align:center}
+.bienen-mark{display:grid;place-items:center;border-radius:9px;background:${XB_MARK};color:#fff;font-weight:700;line-height:1;flex:none}
+.bienen-name{font-weight:600;font-size:13px;color:var(--dsw-alias-label-primary,#292929)}
 .bienen-panel{position:fixed;z-index:40;width:min(360px,calc(100vw - 24px));max-height:min(480px,70vh);display:flex;flex-direction:column;border-radius:12px;background:var(--dsw-specific-menu,#fff);color:var(--dsw-alias-label-primary,#0f1115);box-shadow:var(--dsw-elevation-prominent,0 8px 32px rgba(0,0,0,.18));overflow:hidden}
 .bienen-head,.bienen-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}
 .bienen-head{color:var(--dsw-alias-label-primary,#0f1115);font-size:14px;font-weight:500}
@@ -170,17 +175,38 @@ export function BienenPanel({ wide }) {
       'aria-expanded': open,
       onClick: () => { setOpen((v) => !v) },
     },
-    h('span', { 'aria-hidden': true }, '蜂'),
+    h('span', { className: 'bienen-dotn', 'aria-hidden': true }, '彼'),
     wide ? h('span', { className: 'bienen-label' }, '小彼恩') : null,
     badge > 0 ? h('span', { className: 'bienen-count' }, String(badge)) : null,
     ),
   )
 }
 
+function XiaobienMark({ size = 24 }) {
+  const edge = typeof size === 'number' ? size : 24
+  return h('span', {
+    className: 'bienen-mark',
+    style: { width: edge, height: edge, fontSize: Math.round(edge * 0.52) },
+    'aria-hidden': true,
+  }, '彼')
+}
+
+function XiaobienName() {
+  return h('span', { className: 'bienen-name' }, '小彼恩dsh')
+}
+
 export const inject = ['slots']
 
 export function apply(ctx) {
   ensureCss()
+  if (typeof document !== 'undefined' && document.title !== '小彼恩dsh') {
+    document.title = '小彼恩dsh'
+  }
+  ctx.slots.inject('sidebar.brand.mark', () =>
+    ctx.slots.inject('sidebar.brand.name', function* () {
+      yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: 20 }, XiaobienMark)
+      yield ctx.slots.register({ name: 'sidebar.brand.name', priority: 20 }, XiaobienName)
+    }))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'bienen-market',

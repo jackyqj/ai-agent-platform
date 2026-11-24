@@ -47,9 +47,13 @@ export default function App({ client }: { client?: Client }) {
   }, [state.me, state.route, state.adminPane, state.chat, state.skillDetail, act]);
 
   return (
-    <div className="shell">
-      <Topbar kbMgr={kbMgr} fullAdmin={fullAdmin} kbOnly={kbOnly} route={route} state={state} act={act} />
-      <main className={'main' + (!state.me ? ' main--login' : '') + (route === 'admin' ? ' main--wide' : '')}>
+    <div className={'shell' + (state.me ? ' shell--app' : ' shell--login') + (route === 'chat' ? ' shell--chat' : '')}>
+      {state.me ? (
+        <AppSidebar kbMgr={kbMgr} fullAdmin={fullAdmin} kbOnly={kbOnly} route={route} state={state} act={act} />
+      ) : (
+        <LoginBrand />
+      )}
+      <main className={'main' + (!state.me ? ' main--login' : '') + (route === 'admin' ? ' main--wide' : '') + (route === 'chat' ? ' main--chat' : '')}>
         {!state.me ? (
           <LoginView state={state} act={act} />
         ) : route === 'chat' && state.chat ? (
@@ -82,7 +86,28 @@ function ThemeToggle() {
   );
 }
 
-function Topbar({
+function BrandMark() {
+  return (
+    <div className="brand-lockup">
+      <span className="logo-mark" aria-hidden="true">彼</span>
+      <span className="logo-text">
+        小彼恩 DSH
+        <span>森米工作台</span>
+      </span>
+    </div>
+  );
+}
+
+function LoginBrand() {
+  return (
+    <header className="login-brand">
+      <BrandMark />
+      <ThemeToggle />
+    </header>
+  );
+}
+
+function AppSidebar({
   kbMgr,
   fullAdmin,
   kbOnly,
@@ -97,9 +122,10 @@ function Topbar({
   state: AppState;
   act: Actions;
 }) {
-  const go = (key: 'store' | 'admin' | 'skills', label: string, hash = '#' + key) => (
+  const pending = state.myApprovals.filter((a) => a.status === 'pending').length;
+  const go = (key: 'store' | 'admin' | 'skills', label: string, hash = '#' + key, icon: string) => (
     <a
-      className={route === key ? 'active' : ''}
+      className={'nav-item' + (route === key ? ' active' : '')}
       href={hash}
       onClick={(e) => {
         e.preventDefault();
@@ -114,34 +140,57 @@ function Topbar({
         history.replaceState(null, '', hash);
       }}
     >
+      <span aria-hidden="true">{icon}</span>
       {label}
     </a>
   );
 
+  const openDialogue = () => {
+    if (state.chat) {
+      act.update({ route: 'chat' });
+      history.replaceState(null, '', '#chat');
+      return;
+    }
+    const s = state.mySessions.find((x) => x.status === 'active') ?? state.mySessions[0];
+    if (s) void act.openChat(s.id, s.agentPresetId);
+  };
+
   return (
-    <header className="topbar">
-      <div className="brand">
-        <span className="mark">◈</span>
-        <span>小彼恩dsh</span>
-        <span className="tag">试点</span>
+    <aside className="app-sidebar">
+      <BrandMark />
+      <nav className="app-nav" aria-label="工作台">
+        {go('store', 'Agent 市集', '#store', '🏪')}
+        <button
+          type="button"
+          className={'nav-item' + (route === 'chat' ? ' active' : '')}
+          onClick={openDialogue}
+        >
+          <span aria-hidden="true">💬</span>
+          对话
+          {state.mySessions.length > 0 ? <span className="nav-badge">{state.mySessions.length}</span> : null}
+        </button>
+        {go('skills', '技能', '#skills', '🧩')}
+        {kbMgr ? (fullAdmin ? go('admin', '管理', '#admin', '🛠') : go('admin', '知识库', '#admin/kb', '📚')) : null}
+        {pending > 0 ? (
+          <span className="nav-item nav-item--hint" aria-live="polite">
+            <span aria-hidden="true">✅</span>
+            待审批
+            <span className="nav-badge">{pending}</span>
+          </span>
+        ) : null}
+      </nav>
+      <div className="app-sidebar-foot">
+        {state.me ? (
+          <div className="who">
+            <InboxBell state={state} act={act} />
+            <span>{state.me.name}</span>
+            <span className="role">{state.me.role}</span>
+            <a href="#" onClick={(e) => { e.preventDefault(); act.logout(); }}>退出</a>
+          </div>
+        ) : null}
+        <ThemeToggle />
       </div>
-      {state.me ? (
-        <nav className="nav">
-          {go('store', '商店')}
-          {go('skills', '技能')}
-          {kbMgr ? (fullAdmin ? go('admin', '管理') : go('admin', '知识库', '#admin/kb')) : null}
-        </nav>
-      ) : null}
-      <ThemeToggle />
-      {state.me ? (
-        <div className="who">
-          <InboxBell state={state} act={act} />
-          <span>{state.me.name}</span>
-          <span className="role">{state.me.role}</span>
-          <a href="#" onClick={(e) => { e.preventDefault(); act.logout(); }}>退出</a>
-        </div>
-      ) : null}
-    </header>
+    </aside>
   );
 }
 
@@ -174,8 +223,8 @@ function LoginView({ state, act }: { state: AppState; act: Actions }) {
       <LoginIllustration />
       <div className="login card">
         <p className="eyebrow">企业试点</p>
-        <h2>进入助手商店</h2>
-        <p className="login-lead">用钉钉账号登录，选择已上架的 AI 助手开始对话。</p>
+        <h2>进入森米工作台</h2>
+        <p className="login-lead">用钉钉账号登录，挑选 Agent 开始对话。</p>
         <a className="sso" href="/api/auth/sso/login">使用钉钉登录</a>
         {state.showDevLogin ? (
           <div className="dev-login">

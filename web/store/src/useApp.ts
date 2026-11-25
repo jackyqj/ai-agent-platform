@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient, type Client } from './store-client';
+import { extractCitations, mergeCitations } from './chat-extract';
 import { buildSessionTitles, extractQuestionHint, formatSessionTitle, isQuotaError, tasksToMessages, waitForTaskResult } from './chat-utils';
 import { canKbManage, canSkillManage, isFullAdmin, validateKbFile } from './kb-utils';
 import type { AdminPane, AgentSpec, AppState, ChatMessage, GraphComposeState, GraphNode, GraphSpec, KbVisibility, Me, Route, TaskView } from './types';
@@ -19,6 +20,15 @@ const initial: AppState = {
   toastErr: false,
 
   agents: [],
+  quota: null,
+  favorites: [],
+  storeScene: '',
+  storeQuery: '',
+  detailAgentId: null,
+  employeeKbDocs: [],
+  employeeKbHits: [],
+  employeeKbQuery: '',
+  employeeKbMode: '',
   graphs: [],
   graphBusy: {},
   graphTask: {},
@@ -118,6 +128,10 @@ export interface Actions {
   closeChat(): void;
   deleteSession(sessionId: string): Promise<void>;
   sendMessage(agentId: string, text: string): Promise<void>;
+  cancelRun(): Promise<void>;
+  toggleFavorite(agentId: string): Promise<void>;
+  searchEmployeeKb(query?: string): Promise<void>;
+  loadEmployeeKb(): Promise<void>;
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
@@ -209,6 +223,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   const [state, setState] = useState<AppState>(initial);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ingestPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const run = state.graphCompose?.trialRun;
@@ -309,7 +324,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   async function loadStore() {
     try {
-      const [agentsRes, graphsRes, sessionsRes, schedRes, approvalRes, tasksRes, skillsRes, notesRes] = await Promise.all([
+      const [agentsRes, graphsRes, sessionsRes, schedRes, approvalRes, tasksRes, skillsRes, notesRes, quotaRes, favRes] = await Promise.all([
         client.listAgents(),
         client.listGraphs().catch(() => ({ graphs: [] as AppState['graphs'] })),
         client.listSessions().catch(() => ({ sessions: [] as AppState['mySessions'] })),
@@ -318,6 +333,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         client.listTasks().catch(() => ({ tasks: [] as TaskView[] })),
         client.listSkills().catch(() => ({ skills: [] as AppState['skills'] })),
         client.listNotifications().catch(() => ({ notifications: [] as AppState['inbox'], unread: 0 })),
+        client.myQuota().catch(() => null),
+        client.listFavorites().catch(() => ({ ids: [] as string[] })),
       ]);
       const agents = agentsRes.agents || [];
       const graphs = graphsRes.graphs || [];
@@ -334,6 +351,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         skills: skillsRes.skills || [],
         inbox: notesRes.notifications || [],
         inboxUnread: notesRes.unread || 0,
+        quota: quotaRes,
+        favorites: favRes.ids || [],
       }));
     } catch (e) {
       notify('加载商店失败：' + (e as Error).message, true);
@@ -545,22 +564,42 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         }));
       }
     }
-    patchChat(agentId, { sending: true });
+    runAbort.current?.abort();
+    const ac = new AbortController();
+    runAbort.current = ac;
+    patchChat(agentId, { sending: true, runningTaskId: undefined });
+    const agent = state.agents.find((a) => a.id === agentId);
+    if (agent?.knowledge) {
+      void client.searchKb(text, 5).then((r) => {
+        patchChat(agentId, { citations: r.hits || [] });
+      }).catch(() => undefined);
+    }
     try {
       const r = await client.submitTask(agentId, text, sessionId ?? undefined);
+      patchChat(agentId, { runningTaskId: r.taskId });
       if (r.awaitingApproval) {
         appendChatMessages(agentId, [{ role: 'assistant', text: '已提交，等待审批通过后执行。' }]);
       }
       const outcome = await waitForTaskResult((id) => client.getTask(id), r.taskId, {
         maxAttempts: r.awaitingApproval ? 180 : 40,
         intervalMs: 1500,
+        signal: ac.signal,
       });
       switch (outcome.kind) {
         case 'done':
           appendChatMessages(agentId, [{ role: 'assistant', text: outcome.text }]);
+          patchChat(agentId, {
+            citations: mergeCitations(
+              state.chat?.citations ?? [],
+              extractCitations(outcome.text),
+            ),
+          });
           break;
         case 'failed':
           appendChatMessages(agentId, [{ role: 'assistant', text: outcome.text }]);
+          break;
+        case 'cancelled':
+          appendChatMessages(agentId, [{ role: 'assistant', text: '已停止这一轮。' }]);
           break;
         case 'timeout':
           appendChatMessages(agentId, [{
@@ -576,6 +615,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         }
       }
       if (r.awaitingApproval) await loadMyApprovals().catch(() => undefined);
+      void client.myQuota().then((quota) => setState((prev) => ({ ...prev, quota }))).catch(() => undefined);
     } catch (e) {
       const message = (e as Error).message;
       // 限额等未真正发出的提问：从 transcript 撤回，改为 toast，避免留下「我 / 执行中」残影。
@@ -592,7 +632,62 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
         appendChatMessages(agentId, [{ role: 'assistant', text: message }]);
       }
     } finally {
-      patchChat(agentId, { sending: false });
+      if (runAbort.current === ac) runAbort.current = null;
+      patchChat(agentId, { sending: false, runningTaskId: undefined });
+    }
+  }
+
+  async function cancelRun(): Promise<void> {
+    const chat = state.chat;
+    const taskId = chat?.runningTaskId;
+    runAbort.current?.abort();
+    if (!taskId) {
+      if (chat) patchChat(chat.agentId, { sending: false, runningTaskId: undefined });
+      return;
+    }
+    try {
+      await client.cancelTask(taskId);
+      notify('已请求停止');
+    } catch (e) {
+      notify('停止失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function toggleFavorite(agentId: string): Promise<void> {
+    try {
+      const on = state.favorites.includes(agentId);
+      const r = on ? await client.removeFavorite(agentId) : await client.addFavorite(agentId);
+      setState((prev) => ({ ...prev, favorites: r.ids || [] }));
+    } catch (e) {
+      notify('收藏失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function loadEmployeeKb(): Promise<void> {
+    try {
+      const r = await client.listKbDocuments();
+      setState((prev) => ({ ...prev, employeeKbDocs: r.documents || [] }));
+    } catch (e) {
+      notify('加载知识库失败：' + (e as Error).message, true);
+    }
+  }
+
+  async function searchEmployeeKb(query?: string): Promise<void> {
+    const q = (query ?? state.employeeKbQuery).trim();
+    if (!q) {
+      setState((prev) => ({ ...prev, employeeKbHits: [], employeeKbMode: '' }));
+      return;
+    }
+    try {
+      const r = await client.searchKb(q, 8);
+      setState((prev) => ({
+        ...prev,
+        employeeKbQuery: q,
+        employeeKbHits: r.hits || [],
+        employeeKbMode: r.mode || '',
+      }));
+    } catch (e) {
+      notify('检索失败：' + (e as Error).message, true);
     }
   }
 
@@ -1651,7 +1746,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   }
 
   const act: Actions = {
-    update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, propose,
+    update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, cancelRun, toggleFavorite, searchEmployeeKb, loadEmployeeKb, propose,
     decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
@@ -1673,6 +1768,9 @@ export function parseLocation(hash: string, me: Me | null): { route: Route; admi
   const kbOk = canKbManage(me);
   const fullAdmin = isFullAdmin(me);
   if (h === 'chat' || h.startsWith('chat/')) return { route: 'chat', adminPane: 'workbench' };
+  if (h === 'chats' || h.startsWith('chats/')) return { route: 'chats', adminPane: 'workbench' };
+  if (h === 'approvals' || h.startsWith('approvals/')) return { route: 'approvals', adminPane: 'workbench' };
+  if (h === 'kb' || h === 'knowledge') return { route: 'kb', adminPane: 'workbench' };
   if (h === 'skills' || h.startsWith('skills/')) {
     const skillId = h.startsWith('skills/') ? h.slice('skills/'.length).split('/')[0] : undefined;
     return { route: 'skills', adminPane: 'workbench', skillId: skillId || undefined };

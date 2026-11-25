@@ -1,10 +1,21 @@
+import { AGENT_SCENES, sceneLabel } from './agent-scenes';
 import { type Actions } from './useApp';
-import { Badge, Empty, RunStatusBadge } from './ui';
-import { fmtTs } from './util';
-import type { Agent, AppState, GraphProduct, SessionRow } from './types';
+import { Badge, Empty } from './ui';
+import type { Agent, AppState, GraphProduct, QuotaUsage, SessionRow } from './types';
 
 export default function StoreView({ state, act }: { state: AppState; act: Actions }) {
   const hasSidebar = state.mySessions.length > 0 || state.myApprovals.some((a) => a.status === 'pending');
+  const scene = state.storeScene;
+  const q = state.storeQuery.trim().toLowerCase();
+  const filtered = state.agents.filter((a) => {
+    if (scene && (a.scene ?? 'general') !== scene) return false;
+    if (!q) return true;
+    const blob = `${a.name} ${a.description} ${(a.tags ?? []).join(' ')}`.toLowerCase();
+    return blob.includes(q);
+  });
+  const recommended = recommend(state.agents, state.favorites, state.mySessions);
+  const presentScenes = new Set(state.agents.map((a) => a.scene ?? 'general'));
+  const detail = state.detailAgentId ? state.agents.find((a) => a.id === state.detailAgentId) : undefined;
 
   return (
     <div className="store">
@@ -12,17 +23,62 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
         <p className="eyebrow">市集 · 发现</p>
         <h1>今天想让森米帮你做什么？</h1>
         <p className="lead">从市集挑一个 Agent，点开始使用就会开一条新对话。进行中的会话与待办审批在侧栏。</p>
+        <QuotaBar quota={state.quota} />
       </header>
+
+      <div className="store-filters" role="search">
+        <div className="scene-chips" role="tablist" aria-label="场景">
+          <button
+            type="button"
+            className={'scene-chip' + (!scene ? ' active' : '')}
+            onClick={() => act.update({ storeScene: '' })}
+          >
+            全部
+          </button>
+          {AGENT_SCENES.filter((s) => presentScenes.has(s.id)).map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={'scene-chip' + (scene === s.id ? ' active' : '')}
+              onClick={() => act.update({ storeScene: scene === s.id ? '' : s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <input
+          className="store-search"
+          placeholder="搜名称、标签…"
+          value={state.storeQuery}
+          onChange={(e) => act.update({ storeQuery: e.target.value })}
+        />
+      </div>
 
       <div className={'store-layout' + (hasSidebar ? '' : ' store-layout--solo')}>
         <main className="store-main">
+          {recommended.length > 0 && !scene && !q ? (
+            <section className="section">
+              <SectionTitle title="为你推荐" meta={`${recommended.length} 个`} />
+              <ul className="recommend-strip">
+                {recommended.map((a) => (
+                  <li key={a.id}>
+                    <button type="button" className="recommend-chip" onClick={() => act.update({ detailAgentId: a.id })}>
+                      <span aria-hidden="true">{a.avatar || '✨'}</span>
+                      {a.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <section className="section">
-            <SectionTitle title="可用 Agent" meta={state.agents.length ? `${state.agents.length} 个` : undefined} />
-            {state.agents.length === 0 ? (
-              <Empty>暂无可用 Agent。若刚上架请刷新，或请管理员开通可见范围。</Empty>
+            <SectionTitle title="可用 Agent" meta={filtered.length ? `${filtered.length} 个` : undefined} />
+            {filtered.length === 0 ? (
+              <Empty>没有符合筛选的 Agent。换个场景，或请管理员开通可见范围。</Empty>
             ) : (
               <div className="agents">
-                {state.agents.map((a, i) => <AgentCard key={a.id} a={a} index={i} state={state} act={act} />)}
+                {filtered.map((a, i) => <AgentCard key={a.id} a={a} index={i} state={state} act={act} />)}
               </div>
             )}
           </section>
@@ -54,8 +110,43 @@ export default function StoreView({ state, act }: { state: AppState; act: Action
         ) : null}
       </div>
 
-      <ScheduledSection state={state} act={act} />
-      <ProposeSection state={state} act={act} />
+      {detail ? <AgentDetail a={detail} state={state} act={act} /> : null}
+    </div>
+  );
+}
+
+function recommend(agents: Agent[], favorites: string[], sessions: SessionRow[]): Agent[] {
+  const fav = new Set(favorites);
+  const recent = sessions.map((s) => s.agentPresetId);
+  return agents
+    .map((a) => {
+      let score = 0;
+      if (fav.has(a.id)) score += 100;
+      score += a.favoriteCount ?? 0;
+      const ri = recent.indexOf(a.id);
+      if (ri >= 0) score += Math.max(0, 16 - ri);
+      return { a, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((x, y) => y.score - x.score)
+    .slice(0, 4)
+    .map((x) => x.a);
+}
+
+function QuotaBar({ quota }: { quota: QuotaUsage | null }) {
+  if (!quota || quota.unlimited || quota.budget <= 0) return null;
+  const pct = Math.min(100, Math.round((quota.used / quota.budget) * 100));
+  const tight = quota.remaining <= Math.max(1, Math.floor(quota.budget * 0.15));
+  const period = quota.period === 'month' ? '本月' : '今日';
+  return (
+    <div className={'quota-bar' + (tight ? ' quota-bar--tight' : '')} role="meter" aria-valuenow={quota.used} aria-valuemax={quota.budget} aria-label={`${period}额度`}>
+      <div className="quota-bar-copy">
+        <strong>{period}额度</strong>
+        <span>{quota.used} / {quota.budget} 次 · 剩余 {quota.remaining}</span>
+      </div>
+      <div className="quota-track" aria-hidden="true">
+        <i style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
@@ -94,60 +185,6 @@ function MyApprovals({ state, act }: { state: AppState; act: Actions }) {
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-function ScheduledSection({ state, act }: { state: AppState; act: Actions }) {
-  const f = state.schedForm;
-  return (
-    <section className="section store-panel">
-      <SectionTitle title="定时任务" meta={state.schedTasks.length ? `${state.schedTasks.length} 个` : undefined} />
-      <div className="sched-form">
-        <input placeholder="名称（如 每日早报）" value={f.name} onChange={(e) => act.setSchedForm({ name: e.target.value })} />
-        <input placeholder="调度（daily 09:00 / every 30m / cron 0 9 * * 1）" value={f.schedule} onChange={(e) => act.setSchedForm({ schedule: e.target.value })} />
-        <input placeholder="任务内容" value={f.template} onChange={(e) => act.setSchedForm({ template: e.target.value })} />
-        <select value={f.tz} onChange={(e) => act.setSchedForm({ tz: e.target.value })}>
-          <option value="Asia/Shanghai">亚洲/上海</option>
-          <option value="UTC">UTC</option>
-        </select>
-        <button className="ok" onClick={() => void act.createScheduled()}>创建</button>
-      </div>
-      {state.schedTasks.length === 0 ? (
-        <Empty>暂无定时任务</Empty>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>名称</th><th>调度</th><th>时区</th><th>下次</th><th>状态</th><th></th></tr></thead>
-            <tbody>
-              {state.schedTasks.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.name}</td>
-                  <td className="mono">{t.schedule}</td>
-                  <td className="mono">{t.timezone || '—'}</td>
-                  <td className="mono">{t.nextRunAt ? fmtTs(t.nextRunAt) : '—'}</td>
-                  <td><RunStatusBadge status={t.lastRunStatus ?? t.status} /></td>
-                  <td>
-                    <span className="row" style={{ gap: 6 }}>
-                      <button className="ghost small" onClick={() => void act.runScheduled(t.id)}>运行</button>
-                      <button className="ghost small" onClick={() => void act.loadSchedRuns(t.id)}>历史</button>
-                      <button className="ghost small" onClick={() => void act.setScheduledStatus(t.id, t.status === 'paused' ? 'resume' : 'pause')}>
-                        {t.status === 'paused' ? '恢复' : '暂停'}
-                      </button>
-                      <button className="danger small" onClick={() => void act.removeScheduled(t.id)}>删除</button>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {state.schedRuns.length > 0 ? (
-        <div className="msg sched-runs">
-          {'最近运行：' + state.schedRuns.slice(0, 5).map((r) => `${r.status}${r.error ? ' ' + r.error.slice(0, 30) : ''} ${fmtTs(r.runAt)}`).join('；')}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -209,22 +246,20 @@ function GraphCard({ g, index, state, act }: { g: GraphProduct; index: number; s
   );
 }
 
-const AVATARS = ['📖', '🎧', '✨', '🧪', '💬', '🏃', '📋', '🔍'];
-
-function agentAvatar(id: string): string {
-  let n = 0;
-  for (const c of id) n += c.charCodeAt(0);
-  return AVATARS[n % AVATARS.length];
-}
-
 function AgentCard({ a, index, state, act }: { a: Agent; index: number; state: AppState; act: Actions }) {
   const busy = state.agentBusy[a.id];
+  const starred = state.favorites.includes(a.id);
   return (
     <article className="agent motion-item" style={{ animationDelay: `${Math.min(index, 8) * 0.06}s` }}>
-      <div className="agent-avatar" aria-hidden="true">{agentAvatar(a.id)}</div>
+      <div className="agent-avatar" aria-hidden="true">{a.avatar || '✨'}</div>
       <header className="agent-head">
-        <h3>{a.name}</h3>
+        <h3>
+          <button type="button" className="agent-name-btn" onClick={() => act.update({ detailAgentId: a.id })}>
+            {a.name}
+          </button>
+        </h3>
         <div className="meta">
+          <Badge tone="b-cloud">{sceneLabel(a.scene)}</Badge>
           <Badge tone={a.modelRoute?.pinned ? 'b-private' : 'b-cloud'}>
             {a.modelRoute?.pinned ? '私有模型' : '云端模型'}
           </Badge>
@@ -235,38 +270,56 @@ function AgentCard({ a, index, state, act }: { a: Agent; index: number; state: A
         </div>
       </header>
       <p className="desc">{a.description}</p>
+      {(a.tags ?? []).length > 0 ? (
+        <p className="agent-tags">{(a.tags ?? []).map((t) => <span key={t}>{t}</span>)}</p>
+      ) : null}
       <div className="foot">
         <button className="use" disabled={!!busy} onClick={() => void act.startChat(a.id)}>{busy ? '正在打开…' : '开始使用'}</button>
+        <button
+          type="button"
+          className={'ghost small fav-btn' + (starred ? ' fav-btn--on' : '')}
+          aria-pressed={starred}
+          aria-label={starred ? `取消收藏 ${a.name}` : `收藏 ${a.name}`}
+          onClick={() => void act.toggleFavorite(a.id)}
+        >
+          {starred ? '已收藏' : '收藏'}
+        </button>
+        <button type="button" className="ghost small" onClick={() => act.update({ detailAgentId: a.id })}>详情</button>
       </div>
     </article>
   );
 }
 
-const PRESETS = ['assistant', 'hr-assistant', 'report-builder', 'doc-search'];
-
-function ProposeSection({ state, act }: { state: AppState; act: Actions }) {
-  if (!state.showPropose) {
-    return (
-      <section className="section store-propose-collapsed">
-        <button className="ghost" onClick={() => act.update({ showPropose: true })}>申请新助手</button>
-      </section>
-    );
-  }
+function AgentDetail({ a, state, act }: { a: Agent; state: AppState; act: Actions }) {
+  const busy = state.agentBusy[a.id];
+  const starred = state.favorites.includes(a.id);
   return (
-    <section className="section store-panel store-propose">
-      <SectionTitle title="申请新助手" />
-      <div className="propose-form">
-        <input placeholder="id（如 hr-flow）" value={state.pId} onChange={(e) => act.update({ pId: e.target.value })} />
-        <input placeholder="名称" value={state.pName} onChange={(e) => act.update({ pName: e.target.value })} />
-        <input placeholder="一句话描述" value={state.pDesc} onChange={(e) => act.update({ pDesc: e.target.value })} />
-        <select value={state.pBased} onChange={(e) => act.update({ pBased: e.target.value })}>
-          {PRESETS.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-        <div className="propose-actions">
-          <button onClick={() => void act.propose()}>提交申请</button>
-          <button className="ghost" onClick={() => act.update({ showPropose: false })}>取消</button>
+    <div className="agent-detail-scrim" onClick={() => act.update({ detailAgentId: null })}>
+      <aside className="agent-detail" role="dialog" aria-labelledby="agent-detail-title" onClick={(e) => e.stopPropagation()}>
+        <div className="agent-detail-head">
+          <div className="agent-avatar" aria-hidden="true">{a.avatar || '✨'}</div>
+          <div>
+            <p className="eyebrow">{sceneLabel(a.scene)}</p>
+            <h2 id="agent-detail-title">{a.name}</h2>
+          </div>
+          <button className="ghost small" onClick={() => act.update({ detailAgentId: null })}>关闭</button>
         </div>
-      </div>
-    </section>
+        <p className="lead">{a.description}</p>
+        <ul className="agent-detail-facts">
+          <li>模型 {a.modelRoute?.pinned ? '私有' : '云端'}</li>
+          <li>{a.approvalLevel === 'none' ? '无需审批' : '需要审批'}</li>
+          {a.knowledge ? <li>会检索知识库并标注出处</li> : null}
+        </ul>
+        {(a.tags ?? []).length > 0 ? (
+          <p className="agent-tags">{(a.tags ?? []).map((t) => <span key={t}>{t}</span>)}</p>
+        ) : null}
+        <div className="foot">
+          <button className="use" disabled={!!busy} onClick={() => { act.update({ detailAgentId: null }); void act.startChat(a.id); }}>
+            {busy ? '正在打开…' : '开始使用'}
+          </button>
+          <button className="ghost" onClick={() => void act.toggleFavorite(a.id)}>{starred ? '取消收藏' : '收藏'}</button>
+        </div>
+      </aside>
+    </div>
   );
 }

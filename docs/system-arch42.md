@@ -176,7 +176,7 @@ flowchart TB
 ```
 ai-agent-platform/
   apps/control-plane/          企业外壳 API（NestJS）
-  web/store/                   市集 / 对话 / 管理 / Skill
+  web/store/                   市集 / 对话 / 审批 / 知识库 / 管理 / Skill
   services/mcp-kb/             知识库 MCP
   services/mcp-db/             只读库 MCP
   configs/gateway/             LiteLLM compose + 路由
@@ -305,13 +305,16 @@ flowchart TB
 
 ### 5.3 商店 UI（`web/store`）
 
-Vite + React 单页。路由靠 hash：`store` / `chat` / `admin` / `skills`。`VITE_API_BASE` 默认 `/api`。
+Vite + React 单页。路由靠 hash：`store` / `chats` / `chat` / `approvals` / `kb` / `admin` / `skills`。`VITE_API_BASE` 默认 `/api`。
 
 | 视图 | 作用 |
 |---|---|
-| `StoreView` | Agent 市集 / 组合图目录，开始使用 |
-| `ChatView` | 多轮：`createSession` + `submitTask(sessionId)`，用任务结果拼消息 |
-| `AdminView` | 工作台 / 配置 / 知识库 / 调查 |
+| `StoreView` | Agent 市集：场景筛选、卡片详情、额度条、收藏/推荐、组合图运行 |
+| `ConversationsView` | 员工对话列表 |
+| `ChatView` | 多轮：`createSession` + `submitTask(sessionId)`，可停止；右栏引用/审批闸门/工件 |
+| `ApprovalsView` | 一级审批入口；员工自建提审从市集挪到这里 |
+| `KnowledgeView` | 员工只读知识库检索（JWT 部门/角色，不可改文档） |
+| `AdminView` | 工作台 / 配置 / 知识库管理 / 调查 |
 | `SkillStoreView` | Skill 市场 |
 | `AgentComposeView` / `GraphComposeView` | 编排草稿 |
 
@@ -812,17 +815,21 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | GET | `/auth/dev/login` | 开发登录 |
 | GET | `/auth/sso/login` `/auth/sso/callback` | 钉钉 |
 | GET | `/me` | 当前用户 |
+| GET | `/me/quota` | 员工今日/本月额度（只读，不记账） |
+| GET/POST/DELETE | `/me/favorites` | 员工收藏 |
 | POST/GET | `/sessions` | 逻辑会话 |
 | POST | `/tasks` | 商店发消息 |
+| POST | `/tasks/:id/cancel` | 中断运行中任务 |
 | POST | `/service/trigger` | API Key 触发 |
-| GET | `/agents` `/graphs` `/skills` | 目录 |
+| GET | `/agents` `/graphs` `/skills` `/agent-scenes` | 目录（Agent 含 scene/tags/avatar） |
+| GET/POST | `/kb/documents` `/kb/search` | 员工只读知识库 |
 | GET | `/proxy/:sessionId/*` | 无全局前缀；工作室代理 |
 | GET | `/internal/secrets/:ref` | 容器解析密钥 |
 | \* | `/admin/*` | 用户、配额、审计、KB、实例、IM simulate… |
 
 ## 附录 B — 数据表（平台库）
 
-核心：`users`、`departments`、`sessions`、`instances`、`audit_events`、`api_keys`、`agent_presets`、`tasks`、审批与授权、`quota_*`、`scheduled_*`、`credential_secrets`、`role_definitions`、catalog（connectors/tools/graphs/revisions）、skills（含 feedback/change_requests/notifications）。
+核心：`users`、`departments`、`sessions`、`instances`、`audit_events`、`api_keys`、`agent_presets`（含 scene/tags/avatar）、`agent_favorites`、`tasks`、审批与授权、`quota_*`、`scheduled_*`、`credential_secrets`、`role_definitions`、catalog（connectors/tools/graphs/revisions）、skills（含 feedback/change_requests/notifications）。
 
 DSH 事件：schema `dsh_sessions`（`sessions` + `events` append-only）。
 

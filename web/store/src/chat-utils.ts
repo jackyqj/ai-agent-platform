@@ -129,28 +129,31 @@ export function isQuotaError(message: string): boolean {
 export type TaskWaitResult =
   | { kind: 'done'; text: string }
   | { kind: 'failed'; text: string }
-  | { kind: 'timeout' };
+  | { kind: 'timeout' }
+  | { kind: 'cancelled' };
 
 /** Poll a submitted task until done/failed, or until attempts are exhausted. */
 export async function waitForTaskResult(
   getTask: (id: string) => Promise<{ task: TaskView }>,
   taskId: string,
-  opts?: { maxAttempts?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void> },
+  opts?: { maxAttempts?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; signal?: AbortSignal },
 ): Promise<TaskWaitResult> {
   const maxAttempts = opts?.maxAttempts ?? 120;
   const intervalMs = opts?.intervalMs ?? 1500;
   const sleep = opts?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const signal = opts?.signal;
   for (let i = 0; i < maxAttempts; i++) {
+    if (signal?.aborted) return { kind: 'cancelled' };
     const g = await getTask(taskId);
+    if (signal?.aborted || g.task.status === 'killed') {
+      return { kind: 'cancelled' };
+    }
     if (g.task.status === 'done') {
       const text = (g.task.result?.finalResponse ?? '').trim() || '（无回复）';
       return { kind: 'done', text };
     }
     if (g.task.status === 'failed') {
       return { kind: 'failed', text: (g.task.error || g.task.result?.finalResponse || '任务失败').trim() };
-    }
-    if (g.task.status === 'killed') {
-      return { kind: 'failed', text: g.task.error || '任务已取消' };
     }
     await sleep(intervalMs);
   }

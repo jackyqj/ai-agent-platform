@@ -271,16 +271,18 @@ export class PgStore {
   async upsertAgentPreset(p: {
     id: string; name: string; description: string; visibility: unknown
     modelRoute: unknown; approvalLevel: string; status: string; version: number
+    scene?: string; tags?: string[]; avatar?: string
   }): Promise<void> {
     await this.pool!.query(
-      `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version, scene, tags, avatar)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (id) DO UPDATE SET
          name = excluded.name, description = excluded.description,
          visibility = excluded.visibility, model_route = excluded.model_route,
          approval_level = excluded.approval_level, status = excluded.status,
+         scene = excluded.scene, tags = excluded.tags, avatar = excluded.avatar,
          version = agent_presets.version + 1`,
-      [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status, p.version],
+      [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status, p.version, p.scene ?? 'general', JSON.stringify(p.tags ?? []), p.avatar ?? '✨'],
     )
   }
 
@@ -288,12 +290,21 @@ export class PgStore {
   async insertAgentPresetIfMissing(p: {
     id: string; name: string; description: string; visibility: unknown
     modelRoute: unknown; approvalLevel: string; status: string
+    scene?: string; tags?: string[]; avatar?: string
   }): Promise<void> {
     await this.pool!.query(
-      `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
+      `INSERT INTO agent_presets (id, name, description, visibility, model_route, approval_level, status, version, scene, tags, avatar)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)
        ON CONFLICT (id) DO NOTHING`,
-      [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status],
+      [p.id, p.name, p.description, JSON.stringify(p.visibility ?? {}), JSON.stringify(p.modelRoute ?? {}), p.approvalLevel, p.status, p.scene ?? 'general', JSON.stringify(p.tags ?? []), p.avatar ?? '✨'],
+    )
+  }
+
+  /** 种子目录元数据回填：只改 scene/tags/avatar，不 bump version。 */
+  async patchSeedCatalogMeta(p: { id: string; scene: string; tags: string[]; avatar: string }): Promise<void> {
+    await this.pool!.query(
+      `UPDATE agent_presets SET scene = $2, tags = $3, avatar = $4 WHERE id = $1`,
+      [p.id, p.scene, JSON.stringify(p.tags ?? []), p.avatar],
     )
   }
 
@@ -303,10 +314,37 @@ export class PgStore {
     await this.pool!.query(`DELETE FROM agent_presets WHERE id = $1`, [id])
   }
 
+  async listAgentFavorites(userId: string): Promise<string[]> {
+    const res = await this.pool!.query(
+      `SELECT agent_id AS "agentId" FROM agent_favorites WHERE user_id = $1 ORDER BY created_at DESC`,
+      [userId],
+    )
+    return res.rows.map((r: { agentId: string }) => String(r.agentId))
+  }
+
+  async addAgentFavorite(userId: string, agentId: string): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO agent_favorites (user_id, agent_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [userId, agentId],
+    )
+  }
+
+  async removeAgentFavorite(userId: string, agentId: string): Promise<void> {
+    await this.pool!.query(`DELETE FROM agent_favorites WHERE user_id = $1 AND agent_id = $2`, [userId, agentId])
+  }
+
+  async agentFavoriteCounts(): Promise<Array<{ agentId: string; n: number }>> {
+    const res = await this.pool!.query(
+      `SELECT agent_id AS "agentId", count(*)::int AS n FROM agent_favorites GROUP BY agent_id`,
+    )
+    return res.rows.map((r: { agentId: string; n: number }) => ({ agentId: String(r.agentId), n: Number(r.n) }))
+  }
+
   async listAgentPresets(): Promise<Record<string, unknown>[]> {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",
-              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version
+              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version,
+              scene, tags, avatar
        FROM agent_presets ORDER BY version DESC`,
     )
     return res.rows
@@ -315,7 +353,8 @@ export class PgStore {
   async getAgentPreset(id: string) {
     const res = await this.pool!.query(
       `SELECT id, name, description, visibility, model_route AS "modelRoute",
-              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version
+              approval_level AS "approvalLevel", approval_chain AS "approvalChain", status, version,
+              scene, tags, avatar
        FROM agent_presets WHERE id = $1`,
       [id],
     )

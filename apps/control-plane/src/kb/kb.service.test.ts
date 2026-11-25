@@ -8,6 +8,7 @@ import { can } from '../common/permissions.js'
 import { RolesService } from '../common/roles.service.js'
 import { PgStore } from '../store/pg.store.js'
 import { KbService } from './kb.service.js'
+import { documentVisible } from './kb.types.js'
 
 function kbService() {
   return new KbService(new AuditStore(new PgStore(undefined)))
@@ -53,6 +54,16 @@ test('upload list patch delete document', async () => {
 
   await kb.deleteDocument('test.md')
   assert.equal((await kb.listDocuments()).length, 0)
+})
+
+test('documentVisible matches mcp-kb: public open, dept/role gated otherwise', () => {
+  const internalHr = { classification: 'internal' as const, departments: ['HR'], roles: [] }
+  const confidential = { classification: 'confidential' as const, departments: ['sales'], roles: ['sales-admin'] }
+  assert.equal(documentVisible({ classification: 'public', departments: ['*'], roles: [] }, undefined), true)
+  assert.equal(documentVisible(internalHr, { departments: ['HR'] }), true)
+  assert.equal(documentVisible(internalHr, { departments: ['sales'] }), false)
+  assert.equal(documentVisible(confidential, { departments: ['sales'], roles: ['employee'] }), false)
+  assert.equal(documentVisible(confidential, { departments: ['sales'], roles: ['sales-admin'] }), true)
 })
 
 test('rejects invalid filename', async () => {

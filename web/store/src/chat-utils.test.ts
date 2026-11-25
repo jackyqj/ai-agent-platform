@@ -27,6 +27,17 @@ describe('waitForTaskResult', () => {
     expect(sleeps.length).toBe(3);
   });
 
+  it('returns cancelled when the abort signal fires', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const result = await waitForTaskResult(
+      async () => ({ task: { id: 't1', status: 'running' } }),
+      't1',
+      { signal: ac.signal, sleep: async () => undefined },
+    );
+    expect(result).toEqual({ kind: 'cancelled' });
+  });
+
   it('returns failed when the task fails after approval', async () => {
     const result = await waitForTaskResult(
       async () => ({ task: { id: 't1', status: 'failed', error: '拒绝执行' } }),

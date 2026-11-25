@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ChangeRequestView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, InboxNote, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SkillItem, SkillVersionView, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentScene, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ChangeRequestView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, InboxNote, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, QuotaUsage, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SkillItem, SkillVersionView, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -31,6 +31,14 @@ export interface Client {
   me(): Promise<Me>;
 
   listAgents(): Promise<{ agents: Agent[] }>;
+  listAgentScenes(): Promise<{ scenes: AgentScene[] }>;
+  myQuota(): Promise<QuotaUsage>;
+  listFavorites(): Promise<{ ids: string[] }>;
+  addFavorite(agentId: string): Promise<{ ids: string[] }>;
+  removeFavorite(agentId: string): Promise<{ ids: string[] }>;
+  cancelTask(id: string): Promise<{ task: TaskView; notice: string }>;
+  listKbDocuments(): Promise<{ documents: KbDocument[] }>;
+  searchKb(query: string, limit?: number): Promise<{ hits: KbSearchHit[]; mode: string }>;
   listGraphs(): Promise<{ graphs: GraphProduct[] }>;
   runGraph(id: string, task: string): Promise<{ run: GraphRunView }>;
   getGraphRun(id: string): Promise<{ run: GraphRunView }>;
@@ -191,6 +199,14 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
     me: () => request<Me>('/me'),
 
     listAgents: () => request<{ agents: Agent[] }>('/agents'),
+    listAgentScenes: () => request<{ scenes: AgentScene[] }>('/agent-scenes'),
+    myQuota: () => request<QuotaUsage>('/me/quota'),
+    listFavorites: () => request<{ ids: string[] }>('/me/favorites'),
+    addFavorite: (agentId) => request<{ ids: string[] }>(`/me/favorites/${agentId}`, { method: 'POST', body: {} }),
+    removeFavorite: (agentId) => request<{ ids: string[] }>(`/me/favorites/${agentId}`, { method: 'DELETE' }),
+    cancelTask: (id) => request<{ task: TaskView; notice: string }>(`/tasks/${id}/cancel`, { method: 'POST', body: {} }),
+    listKbDocuments: () => request<{ documents: KbDocument[] }>('/kb/documents'),
+    searchKb: (query, limit) => request<{ hits: KbSearchHit[]; mode: string }>('/kb/search', { method: 'POST', body: { query, limit } }),
     listGraphs: () => request<{ graphs: GraphProduct[] }>('/graphs'),
     runGraph: (id, task) => request<{ run: GraphRunView }>(`/graphs/${id}/run`, { method: 'POST', body: { task } }),
     getGraphRun: (id) => request<{ run: GraphRunView }>(`/graph-runs/${id}`),

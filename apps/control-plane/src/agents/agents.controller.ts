@@ -6,6 +6,7 @@ import { RequirePermission } from '../common/require-permission.decorator.js'
 import { AuditStore } from '../common/audit.store.js'
 import { RolesService } from '../common/roles.service.js'
 import { AgentsService, SpecValidationError, TemplateHasNoSpecError, type AgentPreset } from './agents.service.js'
+import { AGENT_SCENES } from './scenes.js'
 import type { AgentSpec } from './types.js'
 
 @Controller()
@@ -15,6 +16,12 @@ export class AgentsController {
     private readonly roles: RolesService,
     private readonly audit: AuditStore,
   ) {}
+
+  @Get('agent-scenes')
+  @UseGuards(AuthGuard)
+  scenes() {
+    return { scenes: AGENT_SCENES }
+  }
 
   /** 员工视角：可见的已上架 Agent */
   @Get('agents')

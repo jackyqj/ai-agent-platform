@@ -109,6 +109,38 @@ export class QuotaService {
     return this.policies()
   }
 
+  /** 员工自查：只读用量，不记账。无策略或存储不可用视为不限额。 */
+  async peek(userId: string, deptId: string | undefined): Promise<{
+    unlimited: boolean
+    used: number
+    budget: number
+    remaining: number
+    period: 'day' | 'month'
+    overPolicy: 'reject' | 'warn'
+    scopeType?: QuotaPolicy['scopeType']
+  }> {
+    try {
+      const policies = await this.policies()
+      const policy = this.resolve(policies, userId, deptId)
+      if (!policy) {
+        return { unlimited: true, used: 0, budget: 0, remaining: 0, period: 'day', overPolicy: 'warn' }
+      }
+      const used = await this.pg.getUsage(policy.id, this.periodStart(policy.period))
+      return {
+        unlimited: false,
+        used,
+        budget: policy.budgetRequests,
+        remaining: Math.max(0, policy.budgetRequests - used),
+        period: policy.period,
+        overPolicy: policy.overPolicy,
+        scopeType: policy.scopeType,
+      }
+    } catch (e) {
+      this.logger.warn(`quota peek failed: ${(e as Error).message}`)
+      return { unlimited: true, used: 0, budget: 0, remaining: 0, period: 'day', overPolicy: 'warn' }
+    }
+  }
+
   async upsert(input: { id?: string; scopeType: string; scopeId?: string; period?: string; budgetRequests: number; overPolicy?: string }): Promise<void> {
     const period = input.period ?? 'day'
     const scopeType = input.scopeType as QuotaPolicy['scopeType']

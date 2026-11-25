@@ -17,6 +17,14 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     devLogin: vi.fn(async () => ({ accessToken: 't' })),
     me: vi.fn(async () => ({ id: 'u-admin', name: '管理员', role: 'admin', dept: 'IT' })),
     listAgents: vi.fn(async () => ({ agents: [] })),
+    listAgentScenes: vi.fn(async () => ({ scenes: [] })),
+    myQuota: vi.fn(async () => ({ unlimited: true, used: 0, budget: 0, remaining: 0, period: 'day' })),
+    listFavorites: vi.fn(async () => ({ ids: [] })),
+    addFavorite: vi.fn(async () => ({ ids: [] })),
+    removeFavorite: vi.fn(async () => ({ ids: [] })),
+    cancelTask: vi.fn(async () => ({ task: { id: 't1', status: 'killed' }, notice: 'ok' })),
+    listKbDocuments: vi.fn(async () => ({ documents: [] })),
+    searchKb: vi.fn(async () => ({ hits: [], mode: 'none' })),
     listGraphs: vi.fn(async () => ({ graphs: [] })),
     runGraph: vi.fn(async () => ({ run: { id: 'r1', graphId: 'g', status: 'done', steps: [] } })),
     listSessions: vi.fn(async () => ({ sessions: [] })),
@@ -254,10 +262,11 @@ describe('App', () => {
     expect(client.createSession).not.toHaveBeenCalled();
   });
 
-  it('keeps propose behind a secondary control', async () => {
+  it('keeps propose off the market and on the approvals page', async () => {
     const client = fakeClient({ listAgents: vi.fn(async () => ({ agents: [assistant] })) });
-    await loginAs(client);
-    expect(screen.queryByPlaceholderText(/id（如/)).not.toBeInTheDocument();
+    const user = await loginAs(client);
+    expect(screen.queryByRole('button', { name: '申请新助手' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '待审批' }));
     expect(screen.getByRole('button', { name: '申请新助手' })).toBeInTheDocument();
   });
 
@@ -364,7 +373,7 @@ describe('App', () => {
     const table = screen.getByRole('table');
     await user.click(within(table).getByText('HR'));
     await waitFor(() => expect(screen.getByText(/session.create/)).toBeInTheDocument());
-    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '待审批' })).not.toBeInTheDocument();
   });
 
   it('opens the skill market from the nav', async () => {
@@ -402,5 +411,91 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '登录' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: '请假 FAQ' })).toBeInTheDocument());
     expect(client.getSkill).toHaveBeenCalledWith('sk1');
+  });
+
+  it('filters the market by scene and opens agent detail', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({
+        agents: [
+          { ...assistant, scene: 'general', tags: ['问答'], avatar: '✨' },
+          { id: 'picture-book', name: '绘本解析', description: '拆绘本', scene: 'content', tags: ['绘本'], avatar: '📖', approvalLevel: 'none' },
+        ],
+      })),
+    });
+    const user = await loginAs(client);
+    expect(screen.getByText('绘本解析')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '内容' }));
+    expect(screen.getByText('绘本解析')).toBeInTheDocument();
+    expect(screen.queryByText('通用助手')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '详情' }));
+    const detail = screen.getByRole('dialog', { name: '绘本解析' });
+    expect(detail).toBeInTheDocument();
+    expect(within(detail).getByText('拆绘本')).toBeInTheDocument();
+  });
+
+  it('shows the employee quota bar when a budget exists', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      myQuota: vi.fn(async () => ({ unlimited: false, used: 3, budget: 20, remaining: 17, period: 'day' })),
+    });
+    await loginAs(client);
+    expect(screen.getByLabelText('今日额度')).toBeInTheDocument();
+    expect(screen.getByText(/3 \/ 20 次/)).toBeInTheDocument();
+  });
+
+  it('opens the conversations page from the nav', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listSessions: vi.fn(async () => ({
+        sessions: [{ id: 'sess-2', userId: 'u-admin', agentPresetId: 'assistant', status: 'active', createdAt: '2026-08-21T00:00:00Z' }],
+      })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('link', { name: /对话/ }));
+    expect(screen.getByRole('heading', { name: '我的对话' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '打开' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '回市集' })).toBeInTheDocument());
+  });
+
+  it('lets employees open the read-only knowledge view', async () => {
+    const client = fakeClient({
+      me: vi.fn(async () => ({ id: 'u-hr-1', name: 'HR', role: 'employee', dept: '人事' })),
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      listKbDocuments: vi.fn(async () => ({
+        documents: [{ name: 'leave.md', format: 'md', sizeBytes: 12, updatedAt: '', visibility: { classification: 'internal' as const, departments: ['*'], roles: [] }, indexed: true, chunkCount: 3 }],
+      })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('link', { name: '知识库' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: '只读检索' })).toBeInTheDocument());
+    expect(screen.getByText('leave.md')).toBeInTheDocument();
+    expect(client.listKbDocuments).toHaveBeenCalled();
+  });
+
+  it('can stop an in-flight run', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      submitTask: vi.fn(async () => ({ taskId: 't-run', status: 'running', awaitingApproval: false })),
+      getTask: vi.fn(async () => ({ task: { id: 't-run', status: 'running' } })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: '开始使用' }));
+    await waitFor(() => expect(screen.getByPlaceholderText('跟森米说点什么…')).toBeInTheDocument());
+    await user.type(screen.getByPlaceholderText('跟森米说点什么…'), '你好');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument());
+    await waitFor(() => expect(client.submitTask).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    await waitFor(() => expect(client.cancelTask).toHaveBeenCalledWith('t-run'));
+  });
+
+  it('stars an agent as favorite', async () => {
+    const client = fakeClient({
+      listAgents: vi.fn(async () => ({ agents: [assistant] })),
+      addFavorite: vi.fn(async () => ({ ids: ['assistant'] })),
+    });
+    const user = await loginAs(client);
+    await user.click(screen.getByRole('button', { name: '收藏 通用助手' }));
+    await waitFor(() => expect(client.addFavorite).toHaveBeenCalledWith('assistant'));
   });
 });

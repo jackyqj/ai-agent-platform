@@ -7,8 +7,11 @@ import StoreView from './StoreView';
 import SkillStoreView from './SkillStoreView';
 import AdminView from './AdminView';
 import ChatView from './ChatView';
+import ConversationsView from './ConversationsView';
+import ApprovalsView from './ApprovalsView';
+import KnowledgeView from './KnowledgeView';
 import type { Client } from './store-client';
-import type { AdminPane, AppState } from './types';
+import type { AdminPane, AppState, Route } from './types';
 
 export default function App({ client }: { client?: Client }) {
   const { state, act } = useApp(client);
@@ -37,7 +40,7 @@ export default function App({ client }: { client?: Client }) {
       }
       if (parsed.route !== state.route || parsed.adminPane !== state.adminPane) {
         act.update({
-          route: parsed.route === 'chat' && !state.chat ? 'store' : parsed.route,
+          route: parsed.route === 'chat' && !state.chat ? 'chats' : parsed.route,
           adminPane: parsed.adminPane,
         });
       }
@@ -58,6 +61,12 @@ export default function App({ client }: { client?: Client }) {
           <LoginView state={state} act={act} />
         ) : route === 'chat' && state.chat ? (
           <ChatView state={state} act={act} />
+        ) : route === 'chats' || (route === 'chat' && !state.chat) ? (
+          <ConversationsView state={state} act={act} />
+        ) : route === 'approvals' ? (
+          <ApprovalsView state={state} act={act} />
+        ) : route === 'kb' ? (
+          <KnowledgeView state={state} act={act} />
         ) : route === 'admin' && kbMgr ? (
           <AdminView state={state} act={act} kbOnly={kbOnly} />
         ) : route === 'skills' ? (
@@ -122,10 +131,11 @@ function AppSidebar({
   state: AppState;
   act: Actions;
 }) {
-  const pending = state.myApprovals.filter((a) => a.status === 'pending').length;
-  const go = (key: 'store' | 'admin' | 'skills', label: string, hash = '#' + key, icon: string) => (
+  const pending = state.myApprovals.filter((a) => a.status === 'pending').length
+    + (fullAdmin ? state.approvals.length : 0);
+  const go = (key: Route, label: string, hash = '#' + key, icon: string) => (
     <a
-      className={'nav-item' + (route === key ? ' active' : '')}
+      className={'nav-item' + (route === key || (key === 'chats' && route === 'chat') ? ' active' : '')}
       href={hash}
       onClick={(e) => {
         e.preventDefault();
@@ -133,7 +143,7 @@ function AppSidebar({
         act.update({
           route: key,
           adminPane,
-          chat: key === 'store' || key === 'skills' ? null : state.chat,
+          chat: key === 'store' || key === 'skills' || key === 'chats' || key === 'approvals' || key === 'kb' ? null : state.chat,
           skillCreating: false,
           skillDetail: key === 'store' || key === 'skills' ? null : state.skillDetail,
         });
@@ -145,39 +155,41 @@ function AppSidebar({
     </a>
   );
 
-  const openDialogue = () => {
-    if (state.chat) {
-      act.update({ route: 'chat' });
-      history.replaceState(null, '', '#chat');
-      return;
-    }
-    const s = state.mySessions.find((x) => x.status === 'active') ?? state.mySessions[0];
-    if (s) void act.openChat(s.id, s.agentPresetId);
-  };
-
   return (
     <aside className="app-sidebar">
       <BrandMark />
       <nav className="app-nav" aria-label="工作台">
         {go('store', 'Agent 市集', '#store', '🏪')}
-        <button
-          type="button"
-          className={'nav-item' + (route === 'chat' ? ' active' : '')}
-          onClick={openDialogue}
+        <a
+          className={'nav-item' + (route === 'chat' || route === 'chats' ? ' active' : '')}
+          href="#chats"
+          onClick={(e) => {
+            e.preventDefault();
+            act.update({ route: 'chats', chat: null });
+            history.replaceState(null, '', '#chats');
+          }}
         >
           <span aria-hidden="true">💬</span>
           对话
           {state.mySessions.length > 0 ? <span className="nav-badge">{state.mySessions.length}</span> : null}
-        </button>
+        </a>
+        <a
+          className={'nav-item' + (route === 'approvals' ? ' active' : '')}
+          href="#approvals"
+          onClick={(e) => {
+            e.preventDefault();
+            act.update({ route: 'approvals', chat: null });
+            history.replaceState(null, '', '#approvals');
+          }}
+        >
+          <span aria-hidden="true">✅</span>
+          待审批
+          {pending > 0 ? <span className="nav-badge">{pending}</span> : null}
+        </a>
+        {go('kb', '知识库', '#kb', '📚')}
         {go('skills', '技能', '#skills', '🧩')}
-        {kbMgr ? (fullAdmin ? go('admin', '管理', '#admin', '🛠') : go('admin', '知识库', '#admin/kb', '📚')) : null}
-        {pending > 0 ? (
-          <span className="nav-item nav-item--hint" aria-live="polite">
-            <span aria-hidden="true">✅</span>
-            待审批
-            <span className="nav-badge">{pending}</span>
-          </span>
-        ) : null}
+        {kbMgr && fullAdmin ? go('admin', '管理', '#admin', '🛠') : null}
+        {kbOnly ? go('admin', '知识库管理', '#admin/kb', '🛠') : null}
       </nav>
       <div className="app-sidebar-foot">
         {state.me ? (

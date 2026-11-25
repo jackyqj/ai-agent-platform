@@ -51,7 +51,27 @@ export interface Agent {
   approvalLevel?: string;
   approvalChain?: string[];
   status?: string;
+  scene?: string;
+  tags?: string[];
+  avatar?: string;
+  knowledge?: boolean;
+  favoriteCount?: number;
   skillUpdates?: Array<{ skillId: string; boundVersion: string; currentVersion: string }>;
+}
+
+export interface AgentScene {
+  id: string;
+  label: string;
+}
+
+export interface QuotaUsage {
+  unlimited: boolean;
+  used: number;
+  budget: number;
+  remaining: number;
+  period: 'day' | 'month' | string;
+  overPolicy?: 'reject' | 'warn' | string;
+  scopeType?: string;
 }
 
 export interface GraphProduct {
@@ -255,7 +275,7 @@ export interface ModelsBody {
 
 // ── app state (what the views render) ────────────────────
 
-export type Route = 'store' | 'admin' | 'chat' | 'skills';
+export type Route = 'store' | 'admin' | 'chat' | 'skills' | 'chats' | 'approvals' | 'kb';
 
 export type SkillStatus = 'draft' | 'pending' | 'published' | 'archived';
 
@@ -330,6 +350,8 @@ export interface ChatState {
   messages: ChatMessage[];
   historyLoading?: boolean;
   sending?: boolean;
+  runningTaskId?: string;
+  citations?: KbSearchHit[];
 }
 
 export interface TaskSubmitResult {
@@ -365,6 +387,15 @@ export interface AppState {
   toastErr: boolean;
 
   agents: Agent[];
+  quota: QuotaUsage | null;
+  favorites: string[];
+  storeScene: string;
+  storeQuery: string;
+  detailAgentId: string | null;
+  employeeKbDocs: KbDocument[];
+  employeeKbHits: KbSearchHit[];
+  employeeKbQuery: string;
+  employeeKbMode: string;
   graphs: GraphProduct[];
   graphBusy: Record<string, boolean>;
   graphTask: Record<string, string>;

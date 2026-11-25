@@ -9,6 +9,8 @@ import { AuditStore } from '../common/audit.store.js'
 import { SkillsService } from '../skills/skills.service.js'
 import { SkillsError } from '../skills/types.js'
 import type { AgentSpec, CapabilityCatalog, ValidationResult } from './types.js'
+import { isAgentSceneId, type AgentSceneId } from './scenes.js'
+import { FavoritesService } from './favorites.service.js'
 
 export interface AgentPreset {
   id: string
@@ -19,6 +21,11 @@ export interface AgentPreset {
   approvalLevel: 'none' | 'self' | 'manager'
   status: 'draft' | 'published' | 'deprecated'
   version: number
+  scene: AgentSceneId
+  tags: string[]
+  avatar: string
+  knowledge?: boolean
+  favoriteCount?: number
   skillUpdates?: SkillUpdateHint[]
 }
 
@@ -50,38 +57,93 @@ export class TemplateHasNoSpecError extends Error {
   }
 }
 
-// 4 份种子 spec（agent-orchestration-design.md §4.2）：手写，不做 YAML 反编译。
-// persona 对齐现网 presets/*/agent.cordis.yml；mcp 按 persona 实际依赖（kb 已挂，db 未启用）。
-const SEED_SPECS: AgentSpec[] = [
+const FLASH = { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }
+
+interface SeedDef {
+  spec: AgentSpec
+  scene: AgentSceneId
+  tags: string[]
+  avatar: string
+}
+
+// 种子 spec（agent-orchestration-design.md §4.2 + 小彼恩首发包）：手写，不做 YAML 反编译。
+const SEEDS: SeedDef[] = [
   {
-    id: 'assistant', name: '通用助手', description: '日常问答、文档起草、信息整理（试点 4 场景的底座）',
-    visibility: {}, approvalLevel: 'none',
-    modelRoute: { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false },
-    persona: '你是「公司 AI 助手」。你的用户是公司同事（含大量非技术背景同事），回答要直接、平实、可执行。\n你是"把活干完"的助手：能用工具查资料、算数据、生成文档就去做，做完汇报结果。\n涉及公司数据时严格遵守数据分级：机密数据只能在私有模型路由下处理，绝不外传。\n敏感操作（写数据库、对外发送）一律先走审批；超出能力或权限时明确说明，不编造。',
-    mcp: [],
+    spec: {
+      id: 'assistant', name: '通用助手', description: '日常问答、文档起草、信息整理（试点场景的底座）',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是「公司 AI 助手」。你的用户是公司同事（含大量非技术背景同事），回答要直接、平实、可执行。\n你是"把活干完"的助手：能用工具查资料、算数据、生成文档就去做，做完汇报结果。\n涉及公司数据时严格遵守数据分级：机密数据只能在私有模型路由下处理，绝不外传。\n敏感操作（写数据库、对外发送）一律先走审批；超出能力或权限时明确说明，不编造。',
+      mcp: [],
+    },
+    scene: 'general', tags: ['问答', '起草'], avatar: '✨',
   },
   {
-    id: 'hr-assistant', name: 'HR 制度助手', description: '报销/请假/差旅等制度问答，检索公司知识库并标注出处',
-    visibility: {}, approvalLevel: 'none',
-    modelRoute: { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false },
-    persona: '你是公司 HR 制度助手。只回答公司制度相关问题（报销、请假、差旅、考勤、福利等）。\n规则：1) 必须先用 knowledge_search 工具检索制度文档，以检索结果为唯一事实来源；2) 回答时标注出处文档；\n3) 检索不到就明说"知识库未收录"，绝不根据常识编造公司制度；4) 给出来源章节和关键数字。',
-    mcp: ['kb'],
+    spec: {
+      id: 'hr-assistant', name: 'HR 制度助手', description: '报销/请假/差旅等制度问答，检索公司知识库并标注出处',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是公司 HR 制度助手。只回答公司制度相关问题（报销、请假、差旅、考勤、福利等）。\n规则：1) 必须先用 knowledge_search 工具检索制度文档，以检索结果为唯一事实来源；2) 回答时标注出处文档；\n3) 检索不到就明说"知识库未收录"，绝不根据常识编造公司制度；4) 给出来源章节和关键数字。',
+      mcp: ['kb'],
+    },
+    scene: 'hr', tags: ['制度', '知识库'], avatar: '📋',
   },
   {
-    id: 'doc-search', name: '研发文档检索', description: '检索研发规范/设计/FAQ，给出来源位置',
-    visibility: {}, approvalLevel: 'none',
-    modelRoute: { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false },
-    persona: '你是研发文档检索助手。帮工程师快速定位内部文档（规范、设计、FAQ、排障手册）。\n规则：1) 用 knowledge_search 检索并给出来源与位置；2) 检索词先宽后窄，多试几个说法；\n3) 找不到时说明知识库覆盖范围，引导用户提交文档入库。',
-    mcp: ['kb'],
+    spec: {
+      id: 'doc-search', name: '研发文档检索', description: '检索研发规范/设计/FAQ，给出来源位置',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是研发文档检索助手。帮工程师快速定位内部文档（规范、设计、FAQ、排障手册）。\n规则：1) 用 knowledge_search 检索并给出来源与位置；2) 检索词先宽后窄，多试几个说法；\n3) 找不到时说明知识库覆盖范围，引导用户提交文档入库。',
+      mcp: ['kb'],
+    },
+    scene: 'rd', tags: ['文档', '知识库'], avatar: '🔍',
   },
   {
-    id: 'report-builder', name: '数据报表助手', description: '数据库只读查询与汇总报表（模型路由钉死私有，查询需审批）',
-    visibility: { roles: ['developer', 'admin'] }, approvalLevel: 'self',
-    modelRoute: { provider: 'gateway', model: 'private/qwen-72b', pinned: true },
-    persona: '你是公司数据报表助手。只负责用数据库工具查询和汇总数据。\n铁律：1) 第一步必须先实际调用 list_tables 工具查看真实表结构，禁止猜测或编造表名/字段；\n2) 然后调用 query_readonly 执行 SELECT，一次查不清就细化查询；3) 工具返回什么就汇报什么，\n禁止编造工具输出或伪造结果；4) 汇报用表格，标注统计口径（时间范围/分组维度）与行数；\n5) 查询失败或数据为空时如实说明，不得假装成功。',
-    mcp: [],
+    spec: {
+      id: 'report-builder', name: '数据报表助手', description: '数据库只读查询与汇总报表（模型路由钉死私有，查询需审批）',
+      visibility: { roles: ['developer', 'admin'] }, approvalLevel: 'self',
+      modelRoute: { provider: 'gateway', model: 'private/qwen-72b', pinned: true },
+      persona: '你是公司数据报表助手。只负责用数据库工具查询和汇总数据。\n铁律：1) 第一步必须先实际调用 list_tables 工具查看真实表结构，禁止猜测或编造表名/字段；\n2) 然后调用 query_readonly 执行 SELECT，一次查不清就细化查询；3) 工具返回什么就汇报什么，\n禁止编造工具输出或伪造结果；4) 汇报用表格，标注统计口径（时间范围/分组维度）与行数；\n5) 查询失败或数据为空时如实说明，不得假装成功。',
+      mcp: [],
+    },
+    scene: 'data', tags: ['报表', '查询'], avatar: '📊',
+  },
+  {
+    spec: {
+      id: 'picture-book', name: '绘本解析', description: '拆解绘本主题、适读年龄、看点和亲子活动',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是小彼恩的绘本解析助手。面向教研和运营同事，拆解绘本的主题、适读年龄、人物、画面线索、语言点和可延伸的亲子活动。\n规则：1) 先根据用户给出的书名、页文或图片描述做结构化拆解；2) 不确定的出版信息标明「待核实」，不编造 ISBN 或奖项；3) 输出用小标题：主题、年龄、看点、金句、活动建议。',
+      mcp: [],
+    },
+    scene: 'content', tags: ['绘本', '教研'], avatar: '📖',
+  },
+  {
+    spec: {
+      id: 'cs-scripts', name: '客服话术', description: '写可直接发送的家长客服回复与升级建议',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是小彼恩客服话术助手。给一线客服写可直接发送的回复，语气温暖、克制、不承诺做不到的事。\n规则：1) 先确认用户场景（售前/物流/售后/课程）；2) 给出「推荐回复」和「备选短句」；3) 涉及退款、医疗、安全的内容明确升级人工，不擅自承诺。',
+      mcp: [],
+    },
+    scene: 'cs', tags: ['客服', '话术'], avatar: '🎧',
+  },
+  {
+    spec: {
+      id: 'community-copy', name: '社群文案', description: '写家长社群可用的短文案和话题',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是小彼恩社群文案助手。写家长社群（微信群/朋友圈/小红书风格）可用的短文案。\n规则：1) 口语自然，不鸡血、不恐吓；2) 每条给标题、正文和可选话题标签；3) 不使用绝对化疗效承诺。',
+      mcp: [],
+    },
+    scene: 'community', tags: ['社群', '文案'], avatar: '💬',
+  },
+  {
+    spec: {
+      id: 'content-qa', name: '内容质检', description: '检查绘本解读和文案的事实、语气与适龄',
+      visibility: {}, approvalLevel: 'none', modelRoute: FLASH,
+      persona: '你是小彼恩内容质检助手。检查绘本解读、课件、社群文案是否符合品牌语气和事实。\n规则：1) 如有 knowledge_search，先检索品牌规范再评判；2) 输出：通过/修订/退回，以及具体句子级意见；3) 不因风格偏好误杀，只抓事实错误、过激承诺、不适龄。',
+      mcp: ['kb'],
+    },
+    scene: 'content', tags: ['质检', '内容'], avatar: '🧪',
   },
 ]
+
+const SEED_SPECS: AgentSpec[] = SEEDS.map((s) => s.spec)
 
 interface RevisionRow {
   version: number
@@ -106,18 +168,24 @@ export class AgentsService implements OnModuleInit {
     private readonly audit: AuditStore,
     @Inject(PRESET_FILE_STORE) private readonly files: PresetFileStore,
     @Optional() private readonly skills?: SkillsService,
+    @Optional() private readonly favorites?: FavoritesService,
   ) {
-    this.seed('assistant', '通用助手', '日常问答、文档起草、信息整理（试点底座）', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
-    this.seed('hr-assistant', 'HR 制度助手', '报销/请假/差旅制度问答（知识库检索+出处）', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
-    this.seed('report-builder', '数据报表助手', '数据库只读查询与汇总报表', { roles: ['developer', 'admin'] }, { provider: 'gateway', model: 'private/qwen-72b', pinned: true }, 'self')
-    this.seed('doc-search', '研发文档检索', '检索研发规范/设计/FAQ', {}, { provider: 'deepseek-official', model: 'deepseek-ai/deepseek-v4-flash-0731', pinned: false }, 'none')
-  }
-
-  private seed(
-    id: string, name: string, description: string, visibility: AgentPreset['visibility'],
-    modelRoute: AgentPreset['modelRoute'], approvalLevel: AgentPreset['approvalLevel'],
-  ) {
-    this.memory.set(id, { id, name, description, visibility, modelRoute, approvalLevel, status: 'published', version: 0 })
+    for (const s of SEEDS) {
+      this.memory.set(s.spec.id, {
+        id: s.spec.id,
+        name: s.spec.name,
+        description: s.spec.description,
+        visibility: s.spec.visibility,
+        modelRoute: s.spec.modelRoute,
+        approvalLevel: s.spec.approvalLevel,
+        status: 'published',
+        version: 0,
+        scene: s.scene,
+        tags: s.tags,
+        avatar: s.avatar,
+        knowledge: s.spec.mcp.includes('kb'),
+      })
+    }
   }
 
   private async persist(): Promise<boolean> {
@@ -133,6 +201,7 @@ export class AgentsService implements OnModuleInit {
     if (!(await this.persist())) return
     for (const p of this.memory.values()) {
       await this.pg.insertAgentPresetIfMissing(p).catch((e) => this.logger.error(`seed ${p.id} failed: ${(e as Error).message}`))
+      await this.pg.patchSeedCatalogMeta(p).catch((e) => this.logger.error(`seed meta ${p.id} failed: ${(e as Error).message}`))
     }
     // §11.1：种子 spec（含 persona/mcp）写入 composition，作为真实工作副本；
     // 已有 composition 或已发布修订的 agent 不动（不覆盖已发布产物）。
@@ -389,6 +458,7 @@ export class AgentsService implements OnModuleInit {
       id: input.id, name: input.name, description: input.description,
       visibility: draftSpec.visibility, modelRoute: draftSpec.modelRoute, approvalLevel: draftSpec.approvalLevel,
       status: 'draft', version: 1,
+      scene: template.scene, tags: [...template.tags], avatar: template.avatar,
     }
     if (await this.persist()) {
       await this.pg.upsertAgentPreset(draft)
@@ -432,12 +502,18 @@ export class AgentsService implements OnModuleInit {
   }
 
   async decorateSkillUpdates(agents: AgentPreset[]): Promise<AgentPreset[]> {
-    if (!this.skills) return agents
+    const counts = this.favorites ? await this.favorites.counts() : {}
     const out: AgentPreset[] = []
     for (const a of agents) {
       const spec = await this.publishedSpec(a.id)
-      const skillUpdates = spec ? await this.skillUpdatesOf(spec) : []
-      out.push(skillUpdates.length ? { ...a, skillUpdates } : a)
+      const skillUpdates = spec && this.skills ? await this.skillUpdatesOf(spec) : []
+      const knowledge = spec ? spec.mcp.includes('kb') : (SEED_SPECS.find((s) => s.id === a.id)?.mcp.includes('kb') ?? false)
+      out.push({
+        ...a,
+        knowledge,
+        favoriteCount: counts[a.id] ?? a.favoriteCount ?? 0,
+        ...(skillUpdates.length ? { skillUpdates } : {}),
+      })
     }
     return out
   }
@@ -485,6 +561,7 @@ export class AgentsService implements OnModuleInit {
   }
 
   private normalize(r: Record<string, unknown>): AgentPreset {
+    const tags = r.tags
     return {
       id: String(r.id),
       name: String(r.name),
@@ -494,6 +571,9 @@ export class AgentsService implements OnModuleInit {
       approvalLevel: (r.approvalLevel as AgentPreset['approvalLevel']) ?? 'none',
       status: (r.status as AgentPreset['status']) ?? 'draft',
       version: Number(r.version),
+      scene: isAgentSceneId(r.scene) ? r.scene : 'general',
+      tags: Array.isArray(tags) ? tags.map(String) : [],
+      avatar: String(r.avatar ?? '✨'),
     }
   }
 }

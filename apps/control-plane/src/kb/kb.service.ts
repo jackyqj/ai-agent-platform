@@ -14,6 +14,7 @@ import {
   type KbStatus,
   type KbUserContext,
   type KbVisibility,
+  documentVisible,
 } from './kb.types.js'
 
 type DocManifest = Record<string, KbVisibility>
@@ -124,6 +125,11 @@ export class KbService {
       })
     }
     return out.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  async listVisibleDocuments(user: KbUserContext): Promise<KbDocument[]> {
+    const all = await this.listDocuments()
+    return all.filter((d) => documentVisible(d.visibility, user))
   }
 
   async getStatus(): Promise<KbStatus> {

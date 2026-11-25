@@ -170,6 +170,29 @@ test('upsert 同一范围+周期复用已有策略 id（更新而非新建）', 
   assert.equal(calls[1].overPolicy, 'reject')
 })
 
+test('peek 只读用量且不 bump', async () => {
+  let bumped = 0
+  const { svc } = makeService({
+    listQuotaPolicies: async () => [dayPolicy],
+    getUsage: async () => 1,
+    bumpUsage: async () => { bumped += 1 },
+  })
+  const r = await svc.peek('u-1', undefined)
+  assert.equal(r.unlimited, false)
+  assert.equal(r.used, 1)
+  assert.equal(r.budget, 2)
+  assert.equal(r.remaining, 1)
+  assert.equal(r.period, 'day')
+  assert.equal(bumped, 0)
+})
+
+test('peek 无策略视为不限额', async () => {
+  const { svc } = makeService({ listQuotaPolicies: async () => [] })
+  const r = await svc.peek('u-1', undefined)
+  assert.equal(r.unlimited, true)
+  assert.equal(r.budget, 0)
+})
+
 test('upsert 未知范围不传 id（新建）', async () => {
   const calls: Record<string, unknown>[] = []
   const { svc } = makeService({

@@ -8,6 +8,7 @@ import { RolesService } from '../common/roles.service.js'
 import { AgentsService, SpecValidationError, TemplateHasNoSpecError, type AgentPreset } from './agents.service.js'
 import { AGENT_SCENES } from './scenes.js'
 import type { AgentSpec } from './types.js'
+import { ImBindingsService } from '../im/im-bindings.service.js'
 
 @Controller()
 export class AgentsController {
@@ -15,6 +16,7 @@ export class AgentsController {
     private readonly agents: AgentsService,
     private readonly roles: RolesService,
     private readonly audit: AuditStore,
+    private readonly imBindings: ImBindingsService,
   ) {}
 
   @Get('agent-scenes')
@@ -160,7 +162,7 @@ export class AgentsController {
     }
   }
 
-  /** 下架（新会话不可选，存量不受影响） */
+  /** 下架（新会话不可选，存量不受影响）；同步关闭钉钉入口 */
   @Post('admin/agents/:id/unpublish')
   @UseGuards(AuthGuard, PermissionGuard)
   @RequirePermission('agent.publish')
@@ -168,6 +170,69 @@ export class AgentsController {
     const a = await this.agents.unpublish(id)
     if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
     return { agent: a, notice: '已下架' }
+  }
+
+  /**
+   * 开通钉钉入口：将已发布 Agent 绑定到平台钉钉机器人（1:N），不会新建钉钉应用。
+   * body: { keywords?: string[]; priority?: number }
+   */
+  @Post('admin/agents/:id/im')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async enableIm(
+    @Req() req: { user: { sub: string } },
+    @Param('id') id: string,
+    @Body() body: { keywords?: string[]; priority?: number },
+  ) {
+    const a = await this.agents.get(id)
+    if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+    if (a.status !== 'published') {
+      throw new HttpException('agent must be published before enabling IM entrance', HttpStatus.BAD_REQUEST)
+    }
+    try {
+      const binding = await this.imBindings.enable(id, {
+        keywords: body?.keywords,
+        priority: body?.priority,
+        enabledBy: req.user.sub,
+        agentName: a.name,
+        agentStatus: a.status,
+      })
+      await this.audit.append({
+        userId: req.user.sub,
+        eventType: 'admin.agent.im_enable',
+        payload: { id, keywords: binding.keywords, priority: binding.priority },
+      })
+      return { binding, notice: '已开通钉钉入口（挂到平台机器人，未新建钉钉应用）' }
+    } catch (e) {
+      throw new HttpException((e as Error).message, HttpStatus.BAD_REQUEST)
+    }
+  }
+
+  /** 关闭钉钉入口（不删除 Agent） */
+  @Delete('admin/agents/:id/im')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async disableIm(@Req() req: { user: { sub: string } }, @Param('id') id: string) {
+    const a = await this.agents.get(id)
+    if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+    const binding = await this.imBindings.disable(id, { agentName: a.name, agentStatus: a.status })
+    await this.audit.append({ userId: req.user.sub, eventType: 'admin.agent.im_disable', payload: { id } })
+    return { binding, notice: '已关闭钉钉入口' }
+  }
+
+  /** 查询某 Agent 的钉钉入口绑定 */
+  @Get('admin/agents/:id/im')
+  @UseGuards(AuthGuard, PermissionGuard)
+  @RequirePermission('agent.publish')
+  async getIm(@Param('id') id: string) {
+    const a = await this.agents.get(id)
+    if (!a) throw new HttpException('agent not found', HttpStatus.NOT_FOUND)
+    const binding = await this.imBindings.get(id)
+    return {
+      binding: binding
+        ? { ...binding, agentName: a.name, agentStatus: a.status }
+        : null,
+    }
   }
 
   /** 可见性：{roles:[], departments:[]} */

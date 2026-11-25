@@ -6,7 +6,7 @@
 // query-string cleanup, and error-message extraction. Views never touch a path,
 // payload shape, or field name.
 
-import type { Agent, AgentScene, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ChangeRequestView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, InboxNote, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, QuotaUsage, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SkillItem, SkillVersionView, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
+import type { Agent, AgentScene, AgentSpec, Approval, AuditEvent, CapabilityCatalog, CatalogToolView, ChangeRequestView, ConnectorView, GraphProduct, GraphRevision, GraphRunView, GraphSpec, ImAgentBinding, ImStatus, InboxNote, Instance, KbDocument, KbSearchHit, KbStatus, KbVisibility, Me, ModelsBody, PreviewResult, QuotaAlert, QuotaPolicy, QuotaUsage, Revision, RoleDef, ScheduledRunLog, ScheduledTask, SessionRow, SkillItem, SkillVersionView, SpecView, StatsBody, TaskSubmitResult, TaskView, User } from './types';
 
 interface RequestOptions {
   method?: string;
@@ -100,6 +100,11 @@ export interface Client {
     createAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
     removeAgent(id: string): Promise<{ notice: string }>;
     publishAgent(id: string, publish: boolean): Promise<unknown>;
+    enableIm(id: string, body: { keywords?: string[]; priority?: number }): Promise<{ binding: ImAgentBinding; notice: string }>;
+    disableIm(id: string): Promise<{ binding: ImAgentBinding; notice: string }>;
+    getIm(id: string): Promise<{ binding: ImAgentBinding | null }>;
+    imBindings(): Promise<{ bindings: ImAgentBinding[] }>;
+    imStatus(): Promise<ImStatus>;
     users(): Promise<{ users: User[] }>;
     patchUser(id: string, patch: { dept?: string; role?: string; status?: string }): Promise<unknown>;
     sessions(query: Record<string, string | undefined>): Promise<{ sessions: SessionRow[] }>;
@@ -269,6 +274,11 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
       createAgent: (body) => request<{ agent: Agent; notice: string }>('/admin/agents', { method: 'POST', body }),
       removeAgent: (id) => request<{ notice: string }>(`/admin/agents/${id}`, { method: 'DELETE' }),
       publishAgent: (id, publish) => request(`/admin/agents/${id}/${publish ? 'publish' : 'unpublish'}`, { method: 'POST', body: {} }),
+      enableIm: (id, body) => request<{ binding: ImAgentBinding; notice: string }>(`/admin/agents/${id}/im`, { method: 'POST', body }),
+      disableIm: (id) => request<{ binding: ImAgentBinding; notice: string }>(`/admin/agents/${id}/im`, { method: 'DELETE' }),
+      getIm: (id) => request<{ binding: ImAgentBinding | null }>(`/admin/agents/${id}/im`),
+      imBindings: () => request<{ bindings: ImAgentBinding[] }>('/admin/im/bindings'),
+      imStatus: () => request<ImStatus>('/admin/im/status'),
       users: () => request<{ users: User[] }>('/admin/users'),
       patchUser: (id, patch) => request(`/admin/users/${id}`, { method: 'POST', body: patch }),
       sessions: (query) => request<{ sessions: SessionRow[] }>('/admin/sessions', { query }),

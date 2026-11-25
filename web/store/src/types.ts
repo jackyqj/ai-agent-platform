@@ -59,6 +59,26 @@ export interface Agent {
   skillUpdates?: Array<{ skillId: string; boundVersion: string; currentVersion: string }>;
 }
 
+/** 平台钉钉入口绑定（1:N；不会新建钉钉应用） */
+export interface ImAgentBinding {
+  presetId: string;
+  enabled: boolean;
+  keywords: string[];
+  priority: number;
+  robotCode?: string | null;
+  agentName?: string | null;
+  agentStatus?: string | null;
+  enabledAt?: string;
+  updatedAt?: string;
+}
+
+export interface ImStatus {
+  enabled: boolean;
+  streamConnected: boolean;
+  bindingsCount: number;
+  tracked: number;
+}
+
 export interface AgentScene {
   id: string;
   label: string;
@@ -436,6 +456,8 @@ export interface AppState {
 
   approvals: Approval[];
   allAgents: Agent[];
+  imBindings: ImAgentBinding[];
+  imStatus: ImStatus | null;
   stats: { stats: StatsBody } | null;
   quotas: QuotaPolicy[];
   quotaAlerts: QuotaAlert[];

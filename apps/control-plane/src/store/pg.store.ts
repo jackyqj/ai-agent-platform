@@ -859,6 +859,127 @@ export class PgStore {
       [u.id, u.externalId, u.name, u.dept, u.role, u.status, u.roleOverride],
     )
   }
+
+  // --- 18 续：IM Agent 绑定 + conversation→session ---
+
+  async upsertImAgentBinding(b: {
+    presetId: string
+    enabled: boolean
+    keywords: string[]
+    priority: number
+    enabledBy?: string
+  }): Promise<ImAgentBindingRow> {
+    const res = await this.pool!.query<ImAgentBindingRow>(
+      `INSERT INTO im_agent_bindings (preset_id, enabled, keywords, priority, enabled_by, enabled_at, updated_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5, now(), now())
+       ON CONFLICT (preset_id) DO UPDATE SET
+         enabled = excluded.enabled,
+         keywords = excluded.keywords,
+         priority = excluded.priority,
+         enabled_by = COALESCE(excluded.enabled_by, im_agent_bindings.enabled_by),
+         enabled_at = CASE
+           WHEN excluded.enabled AND NOT im_agent_bindings.enabled THEN now()
+           ELSE im_agent_bindings.enabled_at
+         END,
+         updated_at = now()
+       RETURNING preset_id AS "presetId", enabled, keywords, priority,
+                 robot_code AS "robotCode", enabled_by AS "enabledBy",
+                 enabled_at AS "enabledAt", updated_at AS "updatedAt"`,
+      [b.presetId, b.enabled, JSON.stringify(b.keywords ?? []), b.priority, b.enabledBy ?? null],
+    )
+    return normalizeImBinding(res.rows[0])
+  }
+
+  async disableImAgentBinding(presetId: string): Promise<ImAgentBindingRow | undefined> {
+    const res = await this.pool!.query<ImAgentBindingRow>(
+      `UPDATE im_agent_bindings SET enabled = false, updated_at = now()
+       WHERE preset_id = $1
+       RETURNING preset_id AS "presetId", enabled, keywords, priority,
+                 robot_code AS "robotCode", enabled_by AS "enabledBy",
+                 enabled_at AS "enabledAt", updated_at AS "updatedAt"`,
+      [presetId],
+    )
+    return res.rows[0] ? normalizeImBinding(res.rows[0]) : undefined
+  }
+
+  async getImAgentBinding(presetId: string): Promise<ImAgentBindingRow | undefined> {
+    const res = await this.pool!.query<ImAgentBindingRow>(
+      `SELECT preset_id AS "presetId", enabled, keywords, priority,
+              robot_code AS "robotCode", enabled_by AS "enabledBy",
+              enabled_at AS "enabledAt", updated_at AS "updatedAt"
+       FROM im_agent_bindings WHERE preset_id = $1`,
+      [presetId],
+    )
+    return res.rows[0] ? normalizeImBinding(res.rows[0]) : undefined
+  }
+
+  /** 已开通且 Agent 仍为 published 的绑定（含名称，按 priority 降序） */
+  async listEnabledImAgentBindings(): Promise<ImAgentBindingView[]> {
+    const res = await this.pool!.query<ImAgentBindingView>(
+      `SELECT b.preset_id AS "presetId", b.enabled, b.keywords, b.priority,
+              b.robot_code AS "robotCode", b.enabled_by AS "enabledBy",
+              b.enabled_at AS "enabledAt", b.updated_at AS "updatedAt",
+              p.name AS "agentName", p.status AS "agentStatus"
+       FROM im_agent_bindings b
+       JOIN agent_presets p ON p.id = b.preset_id
+       WHERE b.enabled = true AND p.status = 'published'
+       ORDER BY b.priority DESC, b.preset_id ASC`,
+    )
+    return res.rows.map(normalizeImBindingView)
+  }
+
+  async listImAgentBindings(): Promise<ImAgentBindingView[]> {
+    const res = await this.pool!.query<ImAgentBindingView>(
+      `SELECT b.preset_id AS "presetId", b.enabled, b.keywords, b.priority,
+              b.robot_code AS "robotCode", b.enabled_by AS "enabledBy",
+              b.enabled_at AS "enabledAt", b.updated_at AS "updatedAt",
+              p.name AS "agentName", p.status AS "agentStatus"
+       FROM im_agent_bindings b
+       LEFT JOIN agent_presets p ON p.id = b.preset_id
+       ORDER BY b.priority DESC, b.preset_id ASC`,
+    )
+    return res.rows.map(normalizeImBindingView)
+  }
+
+  async countEnabledImAgentBindings(): Promise<number> {
+    const res = await this.pool!.query<{ n: number }>(
+      `SELECT count(*)::int AS n
+       FROM im_agent_bindings b
+       JOIN agent_presets p ON p.id = b.preset_id
+       WHERE b.enabled = true AND p.status = 'published'`,
+    )
+    return res.rows[0]?.n ?? 0
+  }
+
+  async getImConversation(conversationId: string, userId: string): Promise<ImConversationRow | undefined> {
+    const res = await this.pool!.query<ImConversationRow>(
+      `SELECT conversation_id AS "conversationId", user_id AS "userId",
+              preset_id AS "presetId", session_id::text AS "sessionId",
+              conv_type AS "convType", updated_at AS "updatedAt"
+       FROM im_conversations WHERE conversation_id = $1 AND user_id = $2`,
+      [conversationId, userId],
+    )
+    return res.rows[0]
+  }
+
+  async upsertImConversation(c: {
+    conversationId: string
+    userId: string
+    presetId: string
+    sessionId: string
+    convType?: string
+  }): Promise<void> {
+    await this.pool!.query(
+      `INSERT INTO im_conversations (conversation_id, user_id, preset_id, session_id, conv_type, updated_at)
+       VALUES ($1, $2, $3, $4::uuid, $5, now())
+       ON CONFLICT (conversation_id, user_id) DO UPDATE SET
+         preset_id = excluded.preset_id,
+         session_id = excluded.session_id,
+         conv_type = COALESCE(excluded.conv_type, im_conversations.conv_type),
+         updated_at = now()`,
+      [c.conversationId, c.userId, c.presetId, c.sessionId, c.convType ?? null],
+    )
+  }
 }
 
 export interface UserRow {
@@ -869,4 +990,50 @@ export interface UserRow {
   role: string
   status: string
   roleOverride: string | null
+}
+
+export interface ImAgentBindingRow {
+  presetId: string
+  enabled: boolean
+  keywords: string[]
+  priority: number
+  robotCode: string | null
+  enabledBy: string | null
+  enabledAt: string
+  updatedAt: string
+}
+
+export interface ImAgentBindingView extends ImAgentBindingRow {
+  agentName: string | null
+  agentStatus: string | null
+}
+
+export interface ImConversationRow {
+  conversationId: string
+  userId: string
+  presetId: string
+  sessionId: string
+  convType: string | null
+  updatedAt: string
+}
+
+function normalizeKeywords(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
+    } catch {
+      /* ignore */
+    }
+  }
+  return []
+}
+
+function normalizeImBinding(row: ImAgentBindingRow): ImAgentBindingRow {
+  return { ...row, keywords: normalizeKeywords(row.keywords) }
+}
+
+function normalizeImBindingView(row: ImAgentBindingView): ImAgentBindingView {
+  return { ...row, keywords: normalizeKeywords(row.keywords) }
 }

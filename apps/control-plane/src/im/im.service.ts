@@ -1,15 +1,24 @@
-// IM 桥接服务（18 工单）：消息 ↔ 用户会话路由 + 长任务异步回推
-// - 入站：@机器人 → 身份解析（staffId→unionId）→ preset 路由 → tasks.submit → 立即回执
+// IM 桥接服务（18 工单 + 续）：消息 ↔ 绑定表路由 ↔ D22 会话多轮 + 长任务异步回推
+// - 入站：@机器人 → 身份解析 → 绑定路由/会话复用 → tasks.submit(sessionId) → 立即回执
 // - 出站：轮询所跟踪任务（30s），done/failed/killed 后主动推结果到原会话
 // - 安全：敏感操作白名单拒绝（配合 14 审批走 Web）；身份与 Web SSO 同键（unionId）
+// - 与商店会话不互通：仅复用 rpc session 机制，映射表独立于商店会话列表
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import type { RobotTextMessage } from 'dingtalk-stream'
 import { UsersService } from '../users/users.service.js'
 import { TasksService } from '../tasks/tasks.service.js'
+import { SessionsService } from '../sessions/sessions.service.js'
 import { AuditStore } from '../common/audit.store.js'
 import { DingtalkApi } from './dingtalk-api.js'
-import { routePreset, isSensitive, HELP_TEXT, SENSITIVE_REPLY } from './presets.js'
+import { ImBindingsService } from './im-bindings.service.js'
+import {
+  isSensitive,
+  parseSwitchCommand,
+  buildHelpText,
+  buildAmbiguousText,
+  SENSITIVE_REPLY,
+} from './presets.js'
 
 interface TrackedConversation {
   sessionWebhook: string
@@ -31,12 +40,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly users: UsersService,
     private readonly tasks: TasksService,
+    private readonly sessions: SessionsService,
+    private readonly bindings: ImBindingsService,
     private readonly api: DingtalkApi,
     private readonly audit: AuditStore,
   ) {}
 
   onModuleInit() {
-    // 出站轮询：跟踪任务的终态 → 主动推送（worker 直接写 PG，不依赖队列事件）
     this.sweepTimer = setInterval(() => void this.sweep(), this.sweepMs)
   }
 
@@ -44,7 +54,6 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     if (this.sweepTimer) clearInterval(this.sweepTimer)
   }
 
-  /** 同一 msgId 在 TTL 内只处理一次（钉钉未 ack / 多实例竞态的兜底） */
   private isDuplicateMsg(msgId: string | undefined): boolean {
     if (!msgId) return false
     const now = Date.now()
@@ -70,37 +79,142 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     const content = (m.text?.content ?? '').replace(/^@[^\s@]+\s*/, '').trim()
     if (!content) return
 
-    // 帮助菜单
+    const enabled = await this.bindings.listEnabled()
+
     if (/^(帮助|菜单|help|menu)\s*$/.test(content)) {
-      if (m.sessionWebhook) await this.api.replyMarkdown(m.sessionWebhook, '帮助', HELP_TEXT).catch(() => undefined)
+      const help = buildHelpText(
+        enabled.map((b) => ({ id: b.presetId, name: b.agentName ?? b.presetId, keywords: b.keywords })),
+      )
+      if (m.sessionWebhook) await this.api.replyMarkdown(m.sessionWebhook, '帮助', help).catch(() => undefined)
       return
     }
-    // 敏感操作守卫
+
     if (isSensitive(content)) {
       if (m.sessionWebhook) await this.api.replyMarkdown(m.sessionWebhook, '拒绝', SENSITIVE_REPLY).catch(() => undefined)
       return
     }
 
-    // 身份解析：unionId 与 Web SSO 同一身份键；通讯录接口不可用时退化为 ding:staffId
     const unionId = (await this.api.staffToUnionId(m.senderStaffId).catch(() => undefined)) ?? `ding:${m.senderStaffId}`
-    const user = this.users.findByExternal(unionId) ?? (await this.users.upsert({
-      externalId: unionId,
-      name: m.senderNick ?? m.senderStaffId,
-      dept: '未知部门', // 组织同步补齐前，角色走 D12 本地覆盖表
-    }))
+    const user =
+      this.users.findByExternal(unionId) ??
+      (await this.users.upsert({
+        externalId: unionId,
+        name: m.senderNick ?? m.senderStaffId,
+        dept: '未知部门',
+      }))
 
-    const presetId = routePreset(content)
+    const switchTo = parseSwitchCommand(content)
+    if (switchTo !== undefined) {
+      const target = this.bindings.resolveEnabled(switchTo, enabled)
+      if (!target) {
+        const help = buildHelpText(
+          enabled.map((b) => ({ id: b.presetId, name: b.agentName ?? b.presetId, keywords: b.keywords })),
+        )
+        if (m.sessionWebhook) {
+          await this.api
+            .replyMarkdown(m.sessionWebhook, '切换失败', `**未找到已开通入口「${switchTo}」**\n\n${help}`)
+            .catch(() => undefined)
+        }
+        return
+      }
+      if (!m.conversationId) {
+        if (m.sessionWebhook) {
+          await this.api
+            .replyMarkdown(m.sessionWebhook, '切换失败', '缺少会话 ID，无法绑定 Agent。')
+            .catch(() => undefined)
+        }
+        return
+      }
+      const session = await this.sessions.create(user.id, target.presetId)
+      await this.bindings.upsertConversation({
+        conversationId: m.conversationId,
+        userId: user.id,
+        presetId: target.presetId,
+        sessionId: session.id,
+        convType: m.conversationType,
+      })
+      this.audit.append({
+        userId: user.id,
+        sessionId: session.id,
+        eventType: 'im.switch',
+        payload: { presetId: target.presetId, conv: m.conversationId },
+      })
+      if (m.sessionWebhook) {
+        await this.api
+          .replyMarkdown(
+            m.sessionWebhook,
+            '已切换',
+            `**已切换到 ${target.agentName ?? target.presetId}**（\`${target.presetId}\`）\n\n请继续提问。`,
+          )
+          .catch(() => undefined)
+      }
+      return
+    }
+
+    let presetId: string | undefined
+    let sessionId: string | undefined
+
+    const existing = m.conversationId
+      ? await this.bindings.getConversation(m.conversationId, user.id)
+      : undefined
+
+    if (existing) {
+      const sess = await this.sessions.get(existing.sessionId)
+      if (sess && sess.status !== 'closed' && sess.userId === user.id) {
+        presetId = existing.presetId
+        sessionId = existing.sessionId
+      }
+    }
+
+    if (!presetId) {
+      const routed = this.bindings.route(content, enabled)
+      if (routed.kind === 'none') {
+        if (m.sessionWebhook) {
+          await this.api
+            .replyMarkdown(
+              m.sessionWebhook,
+              '未开通',
+              buildHelpText([]),
+            )
+            .catch(() => undefined)
+        }
+        return
+      }
+      if (routed.kind === 'ambiguous') {
+        if (m.sessionWebhook) {
+          await this.api.replyMarkdown(m.sessionWebhook, '请指定', buildAmbiguousText(routed.agents)).catch(() => undefined)
+        }
+        return
+      }
+      presetId = routed.presetId
+      const session = await this.sessions.create(user.id, presetId)
+      sessionId = session.id
+      if (m.conversationId) {
+        await this.bindings.upsertConversation({
+          conversationId: m.conversationId,
+          userId: user.id,
+          presetId,
+          sessionId,
+          convType: m.conversationType,
+        })
+      }
+    }
+
     let taskId: string
     let awaitingApproval = false
     try {
-      const task = await this.tasks.submit(user.id, presetId, content)
+      const task = await this.tasks.submit(user.id, presetId, content, { sessionId })
       taskId = task.id
       awaitingApproval = !!task.awaitingApproval
     } catch (e) {
       this.logger.error(`IM task submit failed: ${(e as Error).message}`)
       if (m.sessionWebhook) {
         await this.api
-          .replyMarkdown(m.sessionWebhook, '提交失败', `**❌ 任务提交失败**\n\n${(e as Error).message}\n\n（常见原因：配额已用尽，或 preset 未就绪）`)
+          .replyMarkdown(
+            m.sessionWebhook,
+            '提交失败',
+            `**❌ 任务提交失败**\n\n${(e as Error).message}\n\n（常见原因：配额已用尽，或 preset 未就绪）`,
+          )
           .catch(() => undefined)
       }
       return
@@ -115,7 +229,18 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         presetId,
       })
     }
-    this.audit.append({ userId: user.id, eventType: 'im.inbound', payload: { taskId, presetId, conv: m.conversationId ?? null, convType: m.conversationType ?? null } })
+    this.audit.append({
+      userId: user.id,
+      sessionId,
+      eventType: 'im.inbound',
+      payload: {
+        taskId,
+        presetId,
+        sessionId: sessionId ?? null,
+        conv: m.conversationId ?? null,
+        convType: m.conversationType ?? null,
+      },
+    })
     if (m.sessionWebhook) {
       const brief = taskId.slice(0, 8)
       await this.api
@@ -128,7 +253,6 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 轮询终态：done/failed/killed → 推送 + 清理 */
   private async sweep(): Promise<void> {
     if (this.tracked.size === 0) return
     for (const [taskId, conv] of [...this.tracked]) {
@@ -145,10 +269,18 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     try {
       if (status === 'done') {
         const answer = task?.result?.finalResponse?.trim()
-        const body = answer ? (answer.length > 4000 ? `${answer.slice(0, 4000)}\n\n_…（结果过长已截断，完整内容见 Web 平台）_` : answer) : '（无文本结果，详见 Web 平台）'
+        const body = answer
+          ? answer.length > 4000
+            ? `${answer.slice(0, 4000)}\n\n_…（结果过长已截断，完整内容见 Web 平台）_`
+            : answer
+          : '（无文本结果，详见 Web 平台）'
         await this.api.replyMarkdown(conv.sessionWebhook, '任务完成', `**✅ 任务完成**（\`${brief}\`）\n\n${body}`)
       } else if (status === 'failed') {
-        await this.api.replyMarkdown(conv.sessionWebhook, '任务失败', `**❌ 任务失败**（\`${brief}\`）\n\n${task?.error ?? '未知错误，请到 Web 平台查看'}`)
+        await this.api.replyMarkdown(
+          conv.sessionWebhook,
+          '任务失败',
+          `**❌ 任务失败**（\`${brief}\`）\n\n${task?.error ?? '未知错误，请到 Web 平台查看'}`,
+        )
       } else {
         await this.api.replyMarkdown(conv.sessionWebhook, '任务已取消', `**⏹ 任务已取消**（\`${brief}\`）`)
       }
@@ -158,28 +290,32 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     this.audit.append({ userId: conv.userId, eventType: 'im.outbound', payload: { taskId, status } })
   }
 
-  /** 供测试/调试：当前跟踪的会话数 */
   trackedCount(): number {
     return this.tracked.size
   }
 
-  /** 供测试/调试：当前跟踪的任务 id 列表 */
   trackedTaskIds(): string[] {
     return [...this.tracked.keys()]
   }
 
-  /** 供测试/调试：主动触发一次轮询 */
   sweepNow(): Promise<void> {
     return this.sweep()
   }
 
   /** 供测试/调试：伪造一条入站消息（不依赖钉钉 Stream） */
-  simulateInbound(m: { text: string; senderStaffId?: string; senderNick?: string; sessionWebhook?: string }): Promise<void> {
+  simulateInbound(m: {
+    text: string
+    senderStaffId?: string
+    senderNick?: string
+    sessionWebhook?: string
+    conversationId?: string
+  }): Promise<void> {
     return this.handleInbound({
       msgId: `sim-${randomUUID()}`,
       senderStaffId: m.senderStaffId ?? 'dev-3001',
       senderNick: m.senderNick ?? '测试',
-      conversationId: `cid-test-${randomUUID()}`,
+      conversationId: m.conversationId ?? `cid-test-${randomUUID()}`,
+      conversationType: '2',
       msgtype: 'text',
       text: { content: m.text },
       sessionWebhook: m.sessionWebhook,

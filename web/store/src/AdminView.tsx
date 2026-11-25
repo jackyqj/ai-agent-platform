@@ -263,9 +263,20 @@ function ApprovalsSection({ state, act }: Props) {
 
 function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpublish: (id: string, name: string) => void; onRemove: (id: string, name: string) => void }) {
   const [chainDrafts, setChainDrafts] = useState<Record<string, string>>({});
+  const [imKeywords, setImKeywords] = useState<Record<string, string>>({});
+  const [imPriority, setImPriority] = useState<Record<string, string>>({});
+  const bindingById = new Map(state.imBindings.map((b) => [b.presetId, b]));
+  const im = state.imStatus;
   return (
     <section className="section admin-panel">
       <h2 className="plain-head">Agent 管理</h2>
+      <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>
+        钉钉入口：将已发布 Agent 挂到<strong>平台钉钉机器人</strong>（不会新建钉钉应用）。
+        {im
+          ? <> Stream {im.streamConnected ? '已连接' : '未连接'} <LiveDot active={im.streamConnected} /> · 已开通 {im.bindingsCount} 个</>
+          : null}
+        {!im?.enabled ? <span> · 未配置钉钉凭证时仍可绑定，但机器人不会收消息</span> : null}
+      </p>
 
       <div className="row" style={{ marginBottom: 10 }}>
         <input placeholder="id（如 hr-flow）" value={state.pId} style={{ minWidth: 110 }} onChange={(e) => act.update({ pId: e.target.value })} />
@@ -283,32 +294,87 @@ function AgentsSection({ state, act, onUnpublish, onRemove }: Props & { onUnpubl
         <div>
           {state.allAgents.map((a) => {
             const draft = chainDrafts[a.id] ?? (a.approvalChain?.join(',') || '');
+            const binding = bindingById.get(a.id);
+            const imOn = !!binding?.enabled;
+            const kwDraft = imKeywords[a.id] ?? (binding?.keywords?.join(',') || '');
+            const priDraft = imPriority[a.id] ?? String(binding?.priority ?? 0);
             return (
-              <div key={a.id} className="row" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                <span>
-                  {a.name}
-                  <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
-                  <Badge tone="b-cloud">{a.status}</Badge>
-                  {(a.skillUpdates ?? []).length > 0 ? <Badge tone="b-warn">可更新</Badge> : null}
-                </span>
-                <span className="row" style={{ gap: 6 }}>
-                  <span className="row" style={{ gap: 4 }}>
-                    <input
-                      placeholder="审批链（逗号分隔角色，如 developer,admin）"
-                      value={draft}
-                      style={{ maxWidth: 180, minWidth: 130 }}
-                      onChange={(e) => setChainDrafts((m) => ({ ...m, [a.id]: e.target.value }))}
-                    />
-                    <button className="ghost small" onClick={() => void act.setAgentChain(a.id, draft.split(',').map((s) => s.trim()).filter(Boolean))}>链</button>
+              <div key={a.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <span>
+                    {a.name}
+                    <span className="mono" style={{ color: 'var(--text-faint)' }}>{'  ' + a.id}</span>{' '}
+                    <Badge tone="b-cloud">{a.status}</Badge>
+                    {imOn ? <Badge tone="b-ok">钉钉入口</Badge> : null}
+                    {(a.skillUpdates ?? []).length > 0 ? <Badge tone="b-warn">可更新</Badge> : null}
                   </span>
-                  <button className="ghost small" onClick={() => void act.openCompose(a.id)}>编排</button>
-                  {a.status === 'published' ? (
-                    <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
-                  ) : (
-                    <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
-                  )}
-                  <button className="danger small" onClick={() => onRemove(a.id, a.name)}>删除</button>
-                </span>
+                  <span className="row" style={{ gap: 6 }}>
+                    <span className="row" style={{ gap: 4 }}>
+                      <input
+                        placeholder="审批链（逗号分隔角色，如 developer,admin）"
+                        value={draft}
+                        style={{ maxWidth: 180, minWidth: 130 }}
+                        onChange={(e) => setChainDrafts((m) => ({ ...m, [a.id]: e.target.value }))}
+                      />
+                      <button className="ghost small" onClick={() => void act.setAgentChain(a.id, draft.split(',').map((s) => s.trim()).filter(Boolean))}>链</button>
+                    </span>
+                    <button className="ghost small" onClick={() => void act.openCompose(a.id)}>编排</button>
+                    {a.status === 'published' ? (
+                      <button className="danger small" onClick={() => onUnpublish(a.id, a.name)}>下架</button>
+                    ) : (
+                      <button className="ok small" onClick={() => void act.toggleAgent(a.id, a.status ?? '')}>上架</button>
+                    )}
+                    <button className="danger small" onClick={() => onRemove(a.id, a.name)}>删除</button>
+                  </span>
+                </div>
+                {a.status === 'published' ? (
+                  <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                    <input
+                      placeholder="钉钉关键词（逗号分隔）"
+                      value={kwDraft}
+                      style={{ minWidth: 160, maxWidth: 240 }}
+                      onChange={(e) => setImKeywords((m) => ({ ...m, [a.id]: e.target.value }))}
+                    />
+                    <input
+                      placeholder="优先级"
+                      value={priDraft}
+                      style={{ width: 64 }}
+                      onChange={(e) => setImPriority((m) => ({ ...m, [a.id]: e.target.value }))}
+                      title="数字越大优先"
+                    />
+                    {imOn ? (
+                      <>
+                        <button
+                          className="ghost small"
+                          onClick={() =>
+                            void act.enableImEntrance(
+                              a.id,
+                              kwDraft.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+                              Number(priDraft) || 0,
+                            )
+                          }
+                        >
+                          更新钉钉入口
+                        </button>
+                        <button className="danger small" onClick={() => void act.disableImEntrance(a.id)}>关闭钉钉入口</button>
+                      </>
+                    ) : (
+                      <button
+                        className="ok small"
+                        onClick={() =>
+                          void act.enableImEntrance(
+                            a.id,
+                            kwDraft.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+                            Number(priDraft) || 0,
+                          )
+                        }
+                        title="将此 Agent 挂到企业钉钉机器人；不会新建钉钉应用"
+                      >
+                        开通钉钉入口
+                      </button>
+                    )}
+                  </div>
+                ) : null}
               </div>
             );
           })}

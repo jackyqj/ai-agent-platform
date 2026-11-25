@@ -1,31 +1,9 @@
-// IM 入口 preset 路由（18 工单）：关键词 → 平台 preset
-// 与 D19 试点 4 场景对齐：制度/HR 问答、报销/财务流程、数据查询报表、研发文档检索
+// IM 入口辅助（18 续）：敏感守卫 + 动态帮助文案
+// 关键词 → preset 路由已迁至 ImBindingsService（绑定表）；不再硬编码场景表。
 
-export const PRESET_HR = 'hr-assistant'
-export const PRESET_REPORT = 'report-builder'
-export const PRESET_DOC = 'doc-search'
-export const PRESET_DEFAULT = 'assistant'
+export const SENSITIVE_REPLY = `**⚠️ 敏感操作不在 IM 处理**
 
-export const HELP_TEXT = `**🤖 AI Agent 平台助手**
-
-直接 @我并提问即可，例如：
-- 「请假的制度是什么？」
-- 「报销发票的流程？」
-- 「上季度华东区销售额是多少？」
-- 「检索研发文档里关于 MCP 的部分」
-
-我会自动路由到对应技能（制度/HR、财务报销、数据报表、研发文档）。
-
-**限制**：涉及审批、删除、付款等敏感操作请到 Web 平台处理。输入「帮助」查看本菜单。`
-
-/** 关键词 → preset 路由（命中即返回；多词时按优先级） */
-export function routePreset(text: string): string {
-  if (/制度|人事|HR|人力|请假|考勤|年假|福利|招聘|绩效|加班/.test(text)) return PRESET_HR
-  if (/报销|发票|财务|差旅|付款|合同|采购|审批流/.test(text)) return PRESET_REPORT
-  if (/数据|报表|统计|查询|订单|销售|业绩|分析|库存/.test(text)) return PRESET_REPORT
-  if (/文档|研发|代码|技术|架构|检索|接口|API|MCP/.test(text)) return PRESET_DOC
-  return PRESET_DEFAULT
-}
+该操作涉及审批/变更，请到 **Web 平台** 完成（走审批流，全程留痕）。IM 入口只支持查询与问答类任务。`
 
 /** 敏感操作守卫：IM 只允许"问/查"，敏感操作引导到 Web（配合 14 审批）
  *  不用 \b：JS 词边界只认 ASCII \w，中文开头会漏检（如「删除所有」）→ 直接关键词匹配；
@@ -39,6 +17,46 @@ export function isSensitive(text: string): boolean {
   return false
 }
 
-export const SENSITIVE_REPLY = `**⚠️ 敏感操作不在 IM 处理**
+/** 解析「切换 <Agent名或id>」；命中返回目标 query，否则 undefined */
+export function parseSwitchCommand(text: string): string | undefined {
+  const m = text.match(/^切换\s+(.+)$/u)
+  const q = m?.[1]?.trim()
+  return q || undefined
+}
 
-该操作涉及审批/变更，请到 **Web 平台** 完成（走审批流，全程留痕）。IM 入口只支持查询与问答类任务。`
+export function buildHelpText(
+  agents: Array<{ id: string; name: string; keywords: string[] }>,
+): string {
+  if (agents.length === 0) {
+    return `**🤖 AI Agent 平台助手**
+
+当前没有已开通钉钉入口的 Agent。请管理员在门户对已发布 Agent 点击「开通钉钉入口」。
+
+**限制**：涉及审批、删除、付款等敏感操作请到 Web 平台处理。`
+  }
+  const lines = agents.map((a) => {
+    const kws = a.keywords.length ? a.keywords.slice(0, 5).join('、') : '（无关键词，单入口时默认路由）'
+    return `- **${a.name}**（\`${a.id}\`）：${kws}`
+  })
+  return `**🤖 AI Agent 平台助手**
+
+直接 @我并提问即可。已开通入口：
+
+${lines.join('\n')}
+
+多入口时请带上关键词，或发送「切换 <Agent名或id>」指定技能。
+
+**限制**：涉及审批、删除、付款等敏感操作请到 Web 平台处理。输入「帮助」查看本菜单。`
+}
+
+export function buildAmbiguousText(
+  agents: Array<{ id: string; name: string; keywords: string[] }>,
+): string {
+  return `**请指定 Agent**
+
+当前开通了多个钉钉入口，未能从内容中匹配关键词。请：
+- 在问题中带上对应关键词，或
+- 发送「切换 <Agent名或id>」后再提问
+
+${buildHelpText(agents)}`
+}

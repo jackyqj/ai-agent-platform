@@ -69,6 +69,8 @@ const initial: AppState = {
 
   approvals: [],
   allAgents: [],
+  imBindings: [],
+  imStatus: null,
   stats: null,
   quotas: [],
   quotaAlerts: [],
@@ -135,6 +137,8 @@ export interface Actions {
   propose(): Promise<void>;
   decide(id: string, approve: boolean): Promise<void>;
   toggleAgent(id: string, status: string): Promise<void>;
+  enableImEntrance(id: string, keywords: string[], priority: number): Promise<void>;
+  disableImEntrance(id: string): Promise<void>;
   createAgent(): Promise<void>;
   removeAgent(id: string): Promise<void>;
   openCompose(agentId: string): Promise<void>;
@@ -377,6 +381,8 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     const jobs: Promise<unknown>[] = [
       client.admin.pendingApprovals().then((r) => setState((prev) => ({ ...prev, approvals: r.approvals || [] }))),
       client.admin.allAgents().then((r) => setState((prev) => ({ ...prev, allAgents: r.agents || [] }))),
+      client.admin.imBindings().then((r) => setState((prev) => ({ ...prev, imBindings: r.bindings || [] }))).catch(recordError('im')),
+      client.admin.imStatus().then((r) => setState((prev) => ({ ...prev, imStatus: r }))).catch(recordError('im')),
       client.admin.statsUsage().then((r) => setState((prev) => ({ ...prev, stats: r }))).catch(recordError('stats')),
       client.admin.quotaPolicies().then((r) => setState((prev) => ({ ...prev, quotas: r.policies || [] }))),
       client.admin.quotaAlerts().then((r) => setState((prev) => ({ ...prev, quotaAlerts: r.alerts || [] }))),
@@ -819,6 +825,22 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       await Promise.all([loadAdminData(), loadStore()]);
       notify(status === 'published' ? '已下架' : '已上架');
     } catch (e) { notify('操作失败：' + (e as Error).message, true); }
+  }
+
+  async function enableImEntrance(id: string, keywords: string[], priority: number) {
+    try {
+      const r = await client.admin.enableIm(id, { keywords, priority });
+      await loadAdminData();
+      notify(r.notice || '已开通钉钉入口');
+    } catch (e) { notify('开通钉钉入口失败：' + (e as Error).message, true); }
+  }
+
+  async function disableImEntrance(id: string) {
+    try {
+      const r = await client.admin.disableIm(id);
+      await loadAdminData();
+      notify(r.notice || '已关闭钉钉入口');
+    } catch (e) { notify('关闭钉钉入口失败：' + (e as Error).message, true); }
   }
 
   async function createAgent() {
@@ -1747,7 +1769,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
 
   const act: Actions = {
     update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, cancelRun, toggleFavorite, searchEmployeeKb, loadEmployeeKb, propose,
-    decide, toggleAgent, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
+    decide, toggleAgent, enableImEntrance, disableImEntrance, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,
     uploadKb, confirmKbUpload, deleteKb, saveKbVisibility, triggerKbIngest, runKbSearch,

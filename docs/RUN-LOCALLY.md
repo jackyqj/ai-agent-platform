@@ -57,15 +57,24 @@ export CP_OIDC_REDIRECT_URI='http://<控制面域名>/api/auth/sso/callback'
 
 # IM 机器人（Stream 模式；默认复用 CP_OIDC_* 凭证，也可用 CP_DINGTALK_* 单独指定）
 # 控制面启动后自动建立长连接（日志出现「钉钉 Stream 已连接」即在线）
+# 钉钉开发者后台仍需人工：企业内部应用 → 开机器人 → Stream → 发布；平台不会自动创建钉钉应用
+```
+
+应用迁移（含 IM 绑定表）后，在商店管理后台对已发布 Agent 点「开通钉钉入口」（可填关键词/优先级）。也可 API：
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application/json" \
+  -d '{"keywords":["请假","人事"],"priority":10}' \
+  http://127.0.0.1:4000/api/admin/agents/hr-assistant/im
 ```
 
 排障/演示（无需真实钉钉群）：
 ```sh
 curl -H "Authorization: Bearer $ADMIN_JWT" http://127.0.0.1:4000/api/admin/im/status
-# → {"enabled":true,"streamConnected":true,"tracked":0,...}
+# → {"enabled":true,"streamConnected":true,"bindingsCount":1,"tracked":0,...}
 curl -X POST -H "Authorization: Bearer $ADMIN_JWT" -H "Content-Type: application/json" \
-  -d '{"text":"公司请假的制度是什么？","sessionWebhook":"http://127.0.0.1:4100/sink"}' \
-  http://127.0.0.1:4000/api/admin/im/simulate   # sessionWebhook 指向自建 sink 可捕获回推
+  -d '{"text":"公司请假的制度是什么？","conversationId":"cid-demo","sessionWebhook":"http://127.0.0.1:4100/sink"}' \
+  http://127.0.0.1:4000/api/admin/im/simulate   # 固定 conversationId 可验多轮同一 session
 ```
 
 ## 3. 模型网关（LiteLLM，03 工单；推荐）
@@ -208,4 +217,4 @@ cd configs/gateway && podman-compose down        # 模型网关（litellm/vllm�
 3. **同用户串行**：per-worker 进程内保证；多 worker 部署需 per-user 队列分区（当前单 worker 假设）。
 4. **沙箱环境**（本机开发）：`DSH_HOME` 指到工作区内的 `.dsh-home`。
 5. **控制面 dev 脚本不可用**：`npm run dev`（tsx watch）会因 tsx/esbuild 不发射 `design:paramtypes` 装饰器元数据导致全部构造注入为 undefined（表现为 `Cannot read properties of undefined (reading 'pool')` 之类的启动崩溃）。**一律 `npm run build && npm start`**（tsc 产物）。
-6. **钉钉回调域名**：SSO 浏览器授权前，须在钉钉开发者后台为应用配置「登录回调域名」（指向控制面 `/api/auth/sso/callback` 的域名）；Stream 机器人无需回调域名，但需在「应用能力-机器人」开通 Stream 模式并发布，且机器人要拉进群后才能收到 @消息。
+6. **钉钉回调域名与入口**：SSO 浏览器授权前，须在钉钉开发者后台为应用配置「登录回调域名」（指向控制面 `/api/auth/sso/callback` 的域名）；Stream 机器人无需回调域名，但需在「应用能力-机器人」开通 Stream 模式并发布，且机器人要拉进群后才能收到 @消息。Agent 侧还须在门户「开通钉钉入口」（绑定到该平台机器人，不会新建钉钉应用），否则入站只会收到「未开通」帮助文案。

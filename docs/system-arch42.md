@@ -295,7 +295,7 @@ flowchart TB
 | `CatalogModule` | 连接器 / 工具 / 组合图（节点 agent\|tool\|gate），图运行 |
 | `SkillsModule` | Skill 草稿、版本审核、反馈、变更请求、站内通知 |
 | `ScheduledModule` | cron / daily / every；时区；失败日志 |
-| `ImModule` | 钉钉 Stream、preset 关键词路由、敏感词守卫、结果回推 |
+| `ImModule` | 钉钉 Stream、`im_agent_bindings` 路由、conversation→D22 会话、敏感词守卫、结果回推 |
 | `SecretsModule` | vault CRUD + `GET /internal/secrets/:ref` |
 | `KeysModule` | API Key 签发（明文一次）/ hash / scope |
 | `KbModule` | 知识库文档可见性、ingest、试搜（管 mcp-kb） |
@@ -423,7 +423,9 @@ sequenceDiagram
   end
 ```
 
-### 6.2 钉钉 IM（一次性任务，不绑商店会话）
+### 6.2 钉钉 IM（平台单机器人 1:N 绑定 + conversation→D22 会话）
+
+产品模型：企业只维护**一个**钉钉 Stream 机器人；管理员在门户对已发布 Agent「开通钉钉入口」（写入 `im_agent_bindings`，可配关键词/优先级），**不会**自动创建钉钉应用。远期可预留 `robot_code` 做 1:1 专用机器人，以及钉钉 AI 助理渠道——本期未实现。
 
 ```mermaid
 sequenceDiagram
@@ -437,9 +439,11 @@ sequenceDiagram
   U->>DT: "@机器人 提问"
   DT->>ST: Stream 回调
   ST->>IM: handleInbound
-  IM->>IM: 去重 msgId、敏感词、关键词到 preset
+  IM->>IM: 去重 msgId、敏感词
   IM->>IM: staffId 到 unionId 到 users.upsert
-  IM->>CP: submit(userId, preset, text)
+  IM->>IM: 绑定表路由或沿用 im_conversations
+  IM->>IM: getOrCreate rpc session
+  IM->>CP: "submit(userId, preset, text, sessionId)"
   IM->>DT: 受理回执
   CP->>W: 队列执行
   loop 每 30s
@@ -448,7 +452,7 @@ sequenceDiagram
   end
 ```
 
-敏感操作（删除/批准/非咨询语境的付款等）直接拒绝，引导到 Web 审批。
+路由：仅 `published` 且 `im_agent_bindings.enabled`；关键词命中取最高 `priority`；无命中且仅一个入口则回退该入口；多入口无命中则回帮助菜单。会话内可发送「切换 Agent名或id」。映射键 `(conversation_id, user_id)` → D22 `session_id`（与商店会话列表不互通）。敏感操作仍拒绝并引导 Web 审批。
 
 ### 6.3 任务提交门（配额 + 审批）
 
@@ -722,7 +726,7 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | D16 | 审计 180 天 | 策略；清理未代码化 |
 | D17 | pgvector + bge-m3 目标 | kb 现为 NVIDIA embedding + 文件索引，替换未完成 |
 | D18 | 机密钉死私有路由 | **网关守卫未实装** |
-| D19 | 试点 4 场景 | 4+1 preset；IM 关键词路由 |
+| D19 | 试点 4 场景 | 4+1 preset；IM 经绑定表开通入口后按关键词路由 |
 | D20 | 自建 vault | `CredentialVault` AES-256-GCM |
 | D21 | PG Provider 平台自有 | 不贡献上游直至 tagged release |
 
@@ -774,7 +778,7 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | 控制面无 TLS | 依赖前置反代 | 仅 loopback |
 | 冒烟 Web 镜像 ≠ 真 DSH Web | 工作室路径易被误测为「已产品化」 | busybox Dockerfile |
 | 语义检索栈与 D17 目标不一致 | 后续要换 pgvector/bge-m3 | kb `vector-index.ts` |
-| IM 与商店会话不互通 | 钉钉每问一次孤立 session_id | D22 非目标 |
+| IM 与商店会话不互通 | IM 自有 conversation→session 映射，不复用商店会话行 | 有意隔离；1:1 专用机器人 / AI 助理渠道为远期 |
 | 审计 TTL 未执行 | 180 天策略无 job | 债 |
 | 组合图与 DSH 工作流两套编排 | 心智与排障成本 | catalog graphs vs `dsh-workflow` |
 | README 仍写商店「无构建」 | 文档漂移 | `web/store` 已是 Vite 应用 |
@@ -825,11 +829,14 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 | GET/POST | `/kb/documents` `/kb/search` | 员工只读知识库 |
 | GET | `/proxy/:sessionId/*` | 无全局前缀；工作室代理 |
 | GET | `/internal/secrets/:ref` | 容器解析密钥 |
-| \* | `/admin/*` | 用户、配额、审计、KB、实例、IM simulate… |
+| POST/DELETE/GET | `/admin/agents/:id/im` | 开通/关闭/查询钉钉入口绑定 |
+| GET | `/admin/im/status` `/admin/im/bindings` | Stream 状态与绑定列表 |
+| POST | `/admin/im/simulate` | 模拟入站（可带 conversationId 验多轮） |
+| \* | `/admin/*` | 用户、配额、审计、KB、实例… |
 
 ## 附录 B — 数据表（平台库）
 
-核心：`users`、`departments`、`sessions`、`instances`、`audit_events`、`api_keys`、`agent_presets`（含 scene/tags/avatar）、`agent_favorites`、`tasks`、审批与授权、`quota_*`、`scheduled_*`、`credential_secrets`、`role_definitions`、catalog（connectors/tools/graphs/revisions）、skills（含 feedback/change_requests/notifications）。
+核心：`users`、`departments`、`sessions`、`instances`、`audit_events`、`api_keys`、`agent_presets`（含 scene/tags/avatar）、`agent_favorites`、`tasks`、审批与授权、`quota_*`、`scheduled_*`、`credential_secrets`、`role_definitions`、catalog（connectors/tools/graphs/revisions）、skills（含 feedback/change_requests/notifications）、`im_agent_bindings`、`im_conversations`。
 
 DSH 事件：schema `dsh_sessions`（`sessions` + `events` append-only）。
 

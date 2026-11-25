@@ -11,6 +11,7 @@ import { SkillsError } from '../skills/types.js'
 import type { AgentSpec, CapabilityCatalog, ValidationResult } from './types.js'
 import { isAgentSceneId, type AgentSceneId } from './scenes.js'
 import { FavoritesService } from './favorites.service.js'
+import { ImBindingsService } from '../im/im-bindings.service.js'
 
 export interface AgentPreset {
   id: string
@@ -169,6 +170,7 @@ export class AgentsService implements OnModuleInit {
     @Inject(PRESET_FILE_STORE) private readonly files: PresetFileStore,
     @Optional() private readonly skills?: SkillsService,
     @Optional() private readonly favorites?: FavoritesService,
+    @Optional() private readonly imBindings?: ImBindingsService,
   ) {
     for (const s of SEEDS) {
       this.memory.set(s.spec.id, {
@@ -255,6 +257,7 @@ export class AgentsService implements OnModuleInit {
 
   async unpublish(id: string): Promise<AgentPreset | undefined> {
     await this.pg.updateAgentPresetStatus(id, 'deprecated')
+    await this.imBindings?.disableOnUnpublish(id)
     return this.get(id)
   }
 

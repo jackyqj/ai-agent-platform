@@ -25,7 +25,7 @@
 | 工单 | 现状 | 阻塞 |
 |---|---|---|
 | 03 模型网关 | LiteLLM 网关已部署并实测（podman-compose 起，宿主端口 4001，避开控制面 4000）；**云端路由 + DSH 经网关跑通任务**（`cloud/deepseek→deepseek-v4-flash`，网关日志 `POST /v1/chat/completions 200`，任务 `turn/end completed`）；**网关 master key 已独立化并落 `GATEWAY_KEY` 到 D20 vault**（新 master 200 / 旧 DS_API_KEY 400 分离，vault 回读一致）；**任务 worker 已接网关**（`worker.cordis.yml` `apiKeyEnv=GATEWAY_KEY`、`worker.ts` 默认 baseURL=网关/模型=`cloud/deepseek`，运行时经网关实测 200）；私有路由 env 化（Qwen 即插即用）；profile 默认模型已切 `gateway/cloud-deepseek` | 私有 vLLM 未起（未测私路由）；用量日志回调未启用；D18 网关路由守卫未实装；交互端 Web 实例复验待做；**运行中的 worker 需重启**以加载网关默认端点/模型 |
-| 05 试点运行 | 材料包（指引/样例/反馈模板）就绪；**M0 已达成**（工具调用端到端） | **种子用户名单**、真人试用 |
+| 05 试点运行 | 材料包（指引/样例/反馈模板）就绪；**M0 已达成**（工具调用端到端）；**种子用户名单已定** | 真人试用与主用场景清单确认 |
 
 ## ⬜ 未开始（后续阶段）
 
@@ -35,7 +35,7 @@
 | 15 审计看板 | ✅ 用量聚合 API + 看板 UI（任务/失败/Agent/配额/错误） | token 成本口径 + OTel 全链路（等 03 网关/日志平台） |
 | 16 配额限流 | ✅ 配额核心（策略/用量/任务前置门，429 实测）+ 管理 UI 面板 + **warn 告警闭环**（quota_alerts 落库可处置 + 审计 quota.warn + 管理后台一键处置）+ **部门级策略**（submit 传 dept，user→dept→all 生效）+ **warn 放行/reject 拦截**（blocked 信号） | token/成本记账（等 03 网关） |
 | 17 RAG 升级 | ✅ 语义检索 v1（NVIDIA embedding + 向量索引，自然问法实测命中） | 真实文档接入；pgvector/bge-m3 替换；rerank v2 |
-| 18 IM 机器人 | **✅ Stream 模式机器人实连 + 桥接全链路**：官方 SDK 长连接（真实凭证 connected=true）、@消息→身份解析→preset 路由→任务入队→受理回执→终态主动推送（sink 捕获实测）；敏感操作分层守卫（8/8 单测） | im/status 在线；simulate 路由/入队/回推全通 | 真实群 @ 验收（需把机器人拉进群）、worker 执行质量（等 Qwen 回归） |
+| 18 IM 机器人 | **✅ Stream + 开通钉钉入口（1:N）+ IM 多轮**：单 Stream 机器人；门户绑定 `im_agent_bindings`；`conversationId+userId`→D22 session；切换 Agent；敏感守卫；unpublish 关入口 | im/status（含 bindingsCount）；simulate 可验多轮；绑定/路由单测 | 真实群 @ 验收；远期 1:1 robot_code / AI 助理渠道 |
 | 20 定时 Agent | ✅ 调度器 + 定时任务 API（tick/run-now/暂停/审批门实测）+ **时区**（任务级 timezone）+ **完整 cron**（5 段 cron，cron-parser）+ **执行失败告警**（scheduled_run_logs + last_run_status + 审计 scheduled.failure + 管理面失败列表） | 与 18 IM 的结果推送联动（等真实群验收） |
 | 21 工作流模板 | ✅ 运行时装配（workflow/subagent 全套）+ 3 个模板库；管线通 | 完整端到端验证（等 Qwen 回归）；模板引用接线 |
 | 22 反馈闭环 | Phase 3 | 试点数据 |
@@ -46,11 +46,12 @@
 钉钉 SSO / Node+TS 控制面 / Docker 起步 / LiteLLM / PG 单库多 schema / 审计 180 天 /
 pgvector+bge-m3 / 数据分级路由强制 / 试点 4 场景 / 自建密钥服务 / **PG Provider 平台自有（D21，待正式版后重评）**。
 
-## 待真人/外部（4 项）
+## 待真人/外部（3 项）
 
-1. 试点人选名单（D19 构成）——阻塞 05/11
-2. 安全评审对接人（D18）
-3. **真实群 @ 验收**（把机器人拉进钉钉测试群；Stream 凭证已在 vault）
-4. 私有 Qwen 端点（可选；当前走 DeepSeek 官方 `deepseek-v4-flash`）
+1. 安全评审对接人（D18）
+2. **真实群 @ 验收**（把机器人拉进钉钉测试群；Stream 凭证已在 vault）
+3. 私有 Qwen 端点（可选；当前走 DeepSeek 官方 `deepseek-v4-flash`）
+
+> 试点人选名单（D19）已就绪（2026-11-25）；05/11 不再被名单阻塞，待真人试用。
 
 > 注：NVIDIA 测试 key 已停用；模型密钥走 D20 vault（`.env` 的 `DS_API_KEY` 仅 bootstrap）。

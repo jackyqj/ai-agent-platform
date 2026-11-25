@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 import { AgentsService } from './agents.service.js'
 import { AgentsController } from './agents.controller.js'
 import { FavoritesController } from './favorites.controller.js'
@@ -7,11 +7,12 @@ import { AgentComposer } from './composer.js'
 import { DEFAULT_CATALOG } from './catalog.js'
 import { DiskPresetFileStore, PRESET_FILE_STORE } from './preset-file-store.js'
 import { SkillsModule } from '../skills/skills.module.js'
+import { ImModule } from '../im/im.module.js'
 
 const DEFAULT_PRESET_ROOT = '/Users/jac/sw_dir/ai-agent-platform/.dsh-home/presets-company'
 
 @Module({
-  imports: [SkillsModule],
+  imports: [SkillsModule, forwardRef(() => ImModule)],
   providers: [
     FavoritesService,
     AgentsService,

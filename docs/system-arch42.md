@@ -30,7 +30,7 @@
 |---|---|---|
 | 1 | **内核可跟随上游** | 平台只依赖能力缝与配置；`dsh-source/` 是 git subtree，平台改动只走 Vendor overlay |
 | 2 | **身份与授权可追溯** | 平台 JWT / API Key；写操作走 `audit_events`；审批链落库 |
-| 3 | **执行可隔离** | 员工对话走 JSON-RPC 任务池（D22）；沙箱 `DSH_PERMISSION_MODE` 按角色注入 |
+| 3 | **执行可隔离** | 员工对话走 JSON-RPC 任务池（D22）；每 session 独立文件 workspace；沙箱 `DSH_PERMISSION_MODE` 按角色注入 |
 | 4 | **密钥不散落** | `credential_secrets` AES-256-GCM；LiteLLM 配置只引用 env |
 | 5 | **失败可定位** | 任务状态机 + 审计事件 + 管理后台会话/任务查询 |
 | 6 | **接入可扩展** | MCP（kb/db）+ 连接器/工具目录 + Agent preset |
@@ -311,7 +311,7 @@ Vite + React 单页。路由靠 hash：`store` / `chats` / `chat` / `approvals` 
 |---|---|
 | `StoreView` | Agent 市集：场景筛选、卡片详情、额度条、收藏/推荐、组合图运行 |
 | `ConversationsView` | 员工对话列表 |
-| `ChatView` | 多轮：`createSession` + `submitTask(sessionId)`，可停止；右栏引用/审批闸门/工件 |
+| `ChatView` | 多轮：`createSession` + `submitTask(sessionId)`，可停止；时间线内状态/审批/问询卡；右栏只留引用/工件/最近对话 |
 | `ApprovalsView` | 一级审批入口；员工自建提审从市集挪到这里 |
 | `KnowledgeView` | 员工只读知识库检索（JWT 部门/角色，不可改文档） |
 | `AdminView` | 工作台 / 配置 / 知识库管理 / 调查 |
@@ -326,12 +326,13 @@ Vite + React 单页。路由靠 hash：`store` / `chats` / `chat` / `approvals` 
 
 1. 消费 Redis 队列 `agent-tasks`
 2. 读 PG `tasks` 行，解析 `payload.task` / `permissionMode` / `sessionId`
-3. vault 解析 `GATEWAY_KEY` 等引用
-4. `DeepSeekHarness` 通过 JSON-RPC SDK 拉起 DSH，并加载 `worker.cordis.yml`
-5. `session_id`：有商店会话则复用；一次性任务（IM/cron/图）用 `task-{id}-a{attempt}` 隔离重试
-6. 写回 `done`/`failed`；启动与周期扫描孤儿 `running` 任务
+3. vault 解析 `GATEWAY_KEY` / `DEEPSEEK_API_KEY` 等引用；`cloud/*` 无网关密钥时回退官方 DeepSeek，`private/*` 仍要求网关
+4. `DeepSeekHarness` 通过 JSON-RPC SDK 拉起 DSH，并加载 `worker.cordis.yml`。JSONL 根是绝对路径 `.sessions-worker/`（`DSH_SESSION_ROOT`）。每个 session 的可写目录是 `.sessions-worker/workspaces/<sessionId>/cwd`（`DSH_CWD` 覆盖的是 workspaces 父目录）。`workspace-write` 跟 session 工作目录走；resume 之后会 `setWorkingDirectory` 到该叶目录。`processCwd` 与 `cwd` 同为该叶目录。员工组合关闭 `agent-instructions`（`disabled` + `maxBytes: 0` + 空 candidates）和宿主 skill 发现（`skill-filesystem.includeDefaultRoots: false`、`customSkillDirs: []`、`watch: false`，并禁用 `tool-skill` / `skill-office` / `upstream-skills`），并用 `@deepseek-ai/dsh-fs-sandbox-read` 替换上游 `fs-sandbox`：写入仍限 workspace（可写 `/tmp`，但 `/tmp` 不可读），读/stat/list/watch/lstat 只允许 session workspace 及 `additionalWritableRoots`；`processPathFromHostPath` 同样过滤。`tool-fs-search`（glob/grep）关闭，因其绕过 `ctx.fs`。
+5. `session_id`：有商店会话则复用（先 `session/resume`，不存在再 create）；一次性任务（IM/cron/图）用 `task-{id}-a{attempt}` 隔离重试。文件 workspace 按该 id 隔离。
+6. `onUserQuestion` 把 DSH `ask_user_question` 写入 `tasks.progress`（kind=inquiry）；商店 `POST /api/tasks/:id/inquiry` 作答后恢复回合
+7. 写回 `done`/`failed`；启动与周期扫描孤儿 `running` 任务
 
-`worker.cordis.yml` 挂载：JSON-RPC server、credentials-pg、`llm-pi-ai`（LiteLLM gateway route；官方直连使用 `llm-deepseek`）、sandbox、agent-spine（公司助手 persona，关闭 bash/jobs/skills）、mcp-kb、mcp-db、subagent/workflow 和 Worker 本地 JSONL 会话根。公司交互 profile 使用平台自有 PG Provider 保存共享会话。
+`worker.cordis.yml` 挂载：JSON-RPC server、credentials-pg、`llm-pi-ai`（LiteLLM gateway route；官方直连使用 `llm-deepseek`）、`fs-sandbox-read`（替换上游 `fs-sandbox` 的读透传）、agent-spine（公司助手 persona，关闭 bash/jobs/skills/glob/grep）、mcp-kb、mcp-db、subagent/workflow 和 Worker 本地 JSONL 会话根。JSONL 租约在 POSIX 上需要宿主 flock addon（`pnpm run build:native-system`，二进制不入库）。公司交互 profile 使用平台自有 PG Provider 保存共享会话。
 
 PG Provider 只接受当前 DSH Session format，不迁移旧格式；旧记录保留在数据库中，但在执行独立迁移前无法打开。
 
@@ -413,7 +414,16 @@ sequenceDiagram
     CP->>R: Queue.add agent-tasks
     W->>R: 取 job
     W->>PG: 读 tasks
-    W->>DSH: harness.run(task, sessionId)
+    W->>W: mkdir .sessions-worker/workspaces/sessionId/cwd
+    W->>DSH: harness.run(task, sessionId) cwd=session workspace
+    opt 问询
+      DSH->>W: user-question/ask
+      W->>PG: progress inquiry
+      UI->>CP: GET /api/tasks/:id
+      U->>UI: 问询卡作答
+      UI->>CP: POST /api/tasks/:id/inquiry
+      W->>DSH: answers
+    end
     DSH->>GW: chat/completions
     DSH->>MCP: 工具调用
     DSH-->>W: RunResult
@@ -753,7 +763,7 @@ DSH 不变量：进模型的内容必须能从 session log 重建。平台商店
 
 - 网关 D18 路由守卫（机密任务打到云端的强制拒绝）
 - token/成本级配额（列已有，执行口径仍是请求数）
-- 对话流式与工具步骤 UI
+- 对话流式 token 与细粒度工具步骤 UI（已有排队/处理/问询卡）
 - 多 worker 同用户串行
 - WebSocket/`/proxy` 升级（工作室）
 - 组织架构定时同步

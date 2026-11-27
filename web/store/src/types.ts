@@ -363,6 +363,36 @@ export interface ChatMessage {
   pending?: boolean;
 }
 
+export interface TaskInquiry {
+  requestId: string;
+  questions: {
+    id: string;
+    prompt: string;
+    header?: string;
+    detail?: string;
+    multiSelect?: boolean;
+    options: { id: string; label: string; hint?: string }[];
+  }[];
+}
+
+export type ChatItem =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'status'; phase: 'queued' | 'running' | 'done' | 'error'; label: string; detail?: string }
+  | {
+      kind: 'inquiry';
+      prompt: string;
+      options: { id: string; label: string; hint?: string }[];
+      selected?: string[];
+      extra?: string;
+      requestId?: string;
+      questionId?: string;
+      multiSelect?: boolean;
+      detail?: string;
+    }
+  | { kind: 'approval'; approvalId: string; action: string; level: string; status: 'pending' | 'granted' | 'cancelled' }
+  | { kind: 'notice'; tone: 'warn' | 'ok'; text: string };
+
 export interface ChatState {
   sessionId: string | null;
   agentId: string;
@@ -370,7 +400,10 @@ export interface ChatState {
   messages: ChatMessage[];
   historyLoading?: boolean;
   sending?: boolean;
+  awaitingApproval?: boolean;
   runningTaskId?: string;
+  runPhase?: 'queued' | 'running';
+  inquiry?: TaskInquiry;
   citations?: KbSearchHit[];
 }
 
@@ -387,6 +420,10 @@ export interface TaskView {
   payload?: { task: string } | string;
   result?: { finalResponse: string; finishReason?: string };
   error?: string;
+  progress?:
+    | { kind: 'inquiry'; inquiry: TaskInquiry }
+    | { kind: 'inquiry-answered'; inquiry: TaskInquiry; answer: { requestId: string; cancelled?: true; answers?: { id: string; selected: string[]; custom?: string }[] } }
+    | { kind: 'working'; label?: string };
   createdAt?: string;
   finishedAt?: string;
 }

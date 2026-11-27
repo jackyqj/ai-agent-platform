@@ -2,12 +2,11 @@
 // 语义：preset 的 approvalLevel = none → 免审批；self → 近期授权命中直接放行（记住 X 小时），否则建 pending；
 // manager → 按审批链逐个角色审批（默认 ['admin']，可从 agent_presets.approval_chain 配置为多级）。
 // 全链通过 → 关联任务入队。decide 校验当前层级审批人角色。超时自动撤销 + 请求人可撤销自己的 pending。
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, forwardRef } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { PgStore } from '../store/pg.store.js'
 import { AuditStore } from '../common/audit.store.js'
 import { AgentsService } from '../agents/agents.service.js'
-import type { TasksService } from '../tasks/tasks.service.js'
 
 export interface ApprovalRequest {
   id: string
@@ -34,7 +33,7 @@ export class ApprovalService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly pg: PgStore,
     private readonly audit: AuditStore,
-    private readonly agents: AgentsService,
+    @Inject(forwardRef(() => AgentsService)) private readonly agents: AgentsService,
   ) {}
 
   onModuleInit() {

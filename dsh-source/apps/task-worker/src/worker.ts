@@ -5,12 +5,22 @@ import { Worker, type Job } from 'bullmq'
 import pg from 'pg'
 import { DeepSeekHarness, type RunResult } from '@deepseek-ai/dsh-sdk-client'
 import { lookupSecret } from '@deepseek-ai/dsh-credentials-pg'
-import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolveDshSessionId } from './resolve-session-id.js'
+import {
+  ensureSessionWorkspace,
+  resolveSessionRoot,
+  resolveWorkspacesParent,
+} from './workspace.js'
+import { assertHostFlockAddon } from './flock-addon.js'
+import { firstNonEmpty, officialModelOf, pickRuntimeRoute } from './runtime-route.js'
+import { promptOnSession } from './session-open.js'
+import { inquiryFromRequest, waitForInquiryAnswer, type TaskProgress } from './inquiry.js'
+import { loadPlatformEnv } from './platform-env.js'
 
-loadPlatformEnv()
+loadPlatformEnv(import.meta.url)
+assertHostFlockAddon()
 
 const REDIS_URL = process.env.CP_REDIS_URL ?? 'redis://127.0.0.1:6379'
 const DATABASE_URL =
@@ -27,22 +37,20 @@ const cfg = {
   orphanGraceMs: Number(process.env.CP_ORPHAN_GRACE_MS ?? 10 * 60 * 1000),
   cancelPollMs: Number(process.env.CP_CANCEL_POLL_MS ?? 3000),
 }
-const runtimeModel = process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
-const runtimeUsesGateway = runtimeModel.startsWith('cloud/') || runtimeModel.startsWith('private/')
+const requestedModel = process.env.DSH_MODEL ?? process.env.DS_API_MODEL ?? 'cloud/deepseek'
+const officialModel = officialModelOf(requestedModel, process.env.DS_API_MODEL)
+const sessionRoot = resolveSessionRoot(import.meta.url, process.env.DSH_SESSION_ROOT)
+mkdirSync(sessionRoot, { recursive: true })
+const workspacesParent = resolveWorkspacesParent(sessionRoot, process.env.DSH_CWD)
 const runtime = {
   dshBin: process.env.CP_RUNTIME_BIN,
   cordis: process.env.CP_RUNTIME_CORDIS ?? fileURLToPath(new URL('../worker.cordis.yml', import.meta.url)),
-  provider: runtimeUsesGateway ? 'gateway' : 'deepseek-official',
-  model: runtimeModel,
-  workspace: process.env.DSH_CWD ?? fileURLToPath(new URL('../workspace', import.meta.url)),
+  requestedModel,
+  officialModel,
+  sessionRoot,
+  workspacesParent,
   gatewayBaseURL: process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:4001/v1',
   deepseekBaseURL: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
-}
-
-/** Load control-plane .env (DS_API_KEY / CP_JWT_SECRET) without overriding a live shell. */
-function loadPlatformEnv(): void {
-  const envPath = join(dirname(fileURLToPath(import.meta.url)), '../../../../../apps/control-plane/.env')
-  if (existsSync(envPath)) process.loadEnvFile(envPath)
 }
 
 /** D20: vault first, then process env. Re-resolved per task for MCP child env. */
@@ -57,6 +65,21 @@ async function resolveRef(ref: string): Promise<string> {
     }
   }
   return process.env[ref] || ''
+}
+
+async function resolveModelKeys(): Promise<{ gatewayKey: string; deepseekKey: string }> {
+  return {
+    gatewayKey: firstNonEmpty(
+      await resolveRef('GATEWAY_KEY'),
+      process.env.GATEWAY_KEY,
+      process.env.LITELLM_MASTER_KEY,
+    ),
+    deepseekKey: firstNonEmpty(
+      await resolveRef('DEEPSEEK_API_KEY'),
+      process.env.DEEPSEEK_API_KEY,
+      process.env.DS_API_KEY,
+    ),
+  }
 }
 
 async function q<T>(text: string, args: unknown[] = []): Promise<{ rows: T[] }> {
@@ -87,14 +110,16 @@ async function getTask(taskId: string): Promise<{
   userId: string
   status: string
   payload: { task?: string; permissionMode?: string; sessionId?: string }
+  progress?: unknown
 } | undefined> {
   const { rows } = await q<{
     id: string
     userId: string
     status: string
     payload: unknown
+    progress?: unknown
   }>(
-    `SELECT id, user_id AS "userId", status, payload FROM tasks WHERE id = $1`,
+    `SELECT id, user_id AS "userId", status, payload, progress FROM tasks WHERE id = $1`,
     [taskId],
   )
   const row = rows[0]
@@ -124,12 +149,13 @@ function turnErrorMessage(result: RunResult): string | undefined {
   return undefined
 }
 
-async function patchTask(id: string, p: { status?: string; result?: unknown; error?: string; started?: boolean; finished?: boolean }) {
+async function patchTask(id: string, p: { status?: string; result?: unknown; error?: string; started?: boolean; finished?: boolean; progress?: TaskProgress }) {
   const sets: string[] = []
   const args: unknown[] = []
   if (p.status) { args.push(p.status); sets.push(`status = $${args.length}`) }
   if (p.result !== undefined) { args.push(JSON.stringify(p.result)); sets.push(`result = $${args.length}`) }
   if (p.error !== undefined) { args.push(p.error); sets.push(`error = $${args.length}`) }
+  if (p.progress !== undefined) { args.push(JSON.stringify(p.progress)); sets.push(`progress = $${args.length}`) }
   if (p.started) sets.push('started_at = now()')
   if (p.finished) sets.push('finished_at = now()')
   if (sets.length === 0) return
@@ -165,11 +191,37 @@ async function runWithCancel(
   }, cfg.cancelPollMs)
 
   try {
-    harness = new DeepSeekHarness({
+    const keys = await resolveModelKeys()
+    const route = pickRuntimeRoute({
+      requestedModel: runtime.requestedModel,
+      gatewayKey: keys.gatewayKey,
+      deepseekKey: keys.deepseekKey,
+      officialModel: runtime.officialModel,
+    })
+    if (route.reason === 'gateway-fallback-official') {
+      console.warn(`[worker] GATEWAY_KEY not configured; using official DeepSeek model=${route.model}`)
+    }
+    const sessionId = resolveDshSessionId({ storeSessionId, taskId, attempt })
+    const workspace = ensureSessionWorkspace(runtime.workspacesParent, sessionId)
+    const sessionHarness = new DeepSeekHarness({
       profile: 'sdk',
       patches: [runtime.cordis],
       ...runtime.dshBin === undefined ? {} : { dshBin: runtime.dshBin },
-      cwd: runtime.workspace,
+      cwd: workspace,
+      processCwd: workspace,
+      onUserQuestion: async (request, context) => {
+        const inquiry = inquiryFromRequest(request)
+        await patchTask(taskId, { progress: { kind: 'inquiry', inquiry } })
+        try {
+          return await waitForInquiryAnswer({
+            requestId: request.requestId,
+            read: () => getTask(taskId),
+            signal: context.signal,
+          })
+        } finally {
+          await patchTask(taskId, { progress: { kind: 'working' } }).catch(() => undefined)
+        }
+      },
       env: {
         ...process.env,
         DATABASE_URL,
@@ -178,24 +230,31 @@ async function runWithCancel(
         CP_JWT_SECRET: process.env.CP_JWT_SECRET || '',
         DEEPSEEK_BASE_URL: runtime.deepseekBaseURL,
         GATEWAY_BASE_URL: runtime.gatewayBaseURL,
-        DSH_CWD: runtime.workspace,
-        DSH_MODEL: runtime.model,
+        DSH_CWD: workspace,
+        DSH_SESSION_ROOT: runtime.sessionRoot,
+        DSH_MODEL: route.model,
         EMBED_API_KEY: await resolveRef('EMBED_API_KEY'),
-        GATEWAY_KEY: (await resolveRef('GATEWAY_KEY')) || process.env.GATEWAY_KEY || '',
-        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || process.env.DS_API_KEY || '',
+        GATEWAY_KEY: keys.gatewayKey,
+        DEEPSEEK_API_KEY: keys.deepseekKey,
         DSH_PERMISSION_MODE: permissionMode,
       },
-      provider: runtime.provider,
-      model: runtime.model,
+      provider: route.provider,
+      model: route.model,
       maxTokens: 8192,
     })
-    const sessionId = resolveDshSessionId({ storeSessionId, taskId, attempt })
+    harness = sessionHarness
     console.log(
       `[worker] task ${taskId} spawning runtime session=${sessionId}`
+      + ` workspace=${workspace}`
       + ` (storeSessionId=${storeSessionId?.trim() || 'none'})`,
     )
     const result = await Promise.race([
-      harness.run(taskText, { sessionId }),
+      promptOnSession(
+        sessionHarness,
+        sessionId,
+        taskText,
+        (id) => sessionHarness.session(id).setWorkingDirectory(workspace),
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(Object.assign(new Error('task timeout'), { code: 'TIMEOUT' })), cfg.timeoutMs),
       ),
@@ -301,7 +360,7 @@ const worker = new Worker(
 )
 
 worker.on('ready', async () => {
-  console.log(`[worker] ready (redis=${REDIS_URL}, concurrency=${cfg.concurrency}, attempts=${cfg.attempts}, model=${runtime.model})`)
+  console.log(`[worker] ready (redis=${REDIS_URL}, concurrency=${cfg.concurrency}, attempts=${cfg.attempts}, model=${runtime.requestedModel})`)
   await sweepOrphans('worker-startup', 0) // 启动即回收孤儿（单 worker 假设）
   setInterval(() => sweepOrphans('stuck', cfg.orphanGraceMs), 60_000)
 })

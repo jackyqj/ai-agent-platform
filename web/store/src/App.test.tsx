@@ -36,6 +36,7 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
     getTask: vi.fn(async () => ({
       task: { id: 't1', status: 'done', payload: { task: '你好' }, result: { finalResponse: '好的' } },
     })),
+    answerTaskInquiry: vi.fn(async () => ({ task: { id: 't1', status: 'running' } })),
     proposeAgent: vi.fn(async () => ({ agent: { id: 'x', name: 'x', description: '' }, notice: 'ok' })),
     listScheduled: vi.fn(async () => ({ tasks: [] })),
     createScheduled: vi.fn(async () => ({ task: { id: 's', ownerUserId: 'u', name: 'n', agentPresetId: 'a', schedule: 'every 1m', taskTemplate: 't', status: 'active', createdAt: '' }, notice: 'ok' })),

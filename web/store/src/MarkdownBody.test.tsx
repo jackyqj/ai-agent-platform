@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import MarkdownBody from './MarkdownBody';
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn(async () => ({ svg: '<svg data-testid="mermaid-svg"></svg>' })),
+  },
+}));
 
 describe('MarkdownBody', () => {
   it('renders headings, lists, and bold text', () => {
@@ -21,5 +28,12 @@ describe('MarkdownBody', () => {
     const { container } = render(<MarkdownBody text={'你好 <script>alert(1)</script>'} />);
     expect(container.querySelector('script')).toBeNull();
     expect(container.textContent).toContain('你好');
+  });
+
+  it('renders a mermaid fence as a diagram instead of a code listing', async () => {
+    const { container } = render(<MarkdownBody text={'```mermaid\nflowchart TD\nA([开始]) --> B[执行]\n```'} />);
+    expect(await screen.findByTestId('mermaid-svg')).toBeInTheDocument();
+    expect(screen.getByText('图示')).toBeInTheDocument();
+    expect(container.querySelector('pre code')).toBeNull();
   });
 });

@@ -57,3 +57,24 @@ test('submit without sessionId keeps one-shot isolation (no payload.sessionId)',
   const rec = await tasks.submit('u-admin', 'assistant', 'cron/im one-shot')
   assert.equal(rec.payload.sessionId, undefined)
 })
+
+test('answerInquiry hangs a question on the owner task and rejects strangers', async () => {
+  const { tasks } = makeTasks()
+  const rec = await tasks.submit('u-admin', 'assistant', 'hi')
+  const patch = (tasks as unknown as {
+    patchRecord: (id: string, p: Record<string, unknown>) => Promise<void>
+  }).patchRecord.bind(tasks)
+  const inquiry = {
+    requestId: 'rq1',
+    questions: [{ id: 'direction', prompt: '接下来？', options: [{ id: '继续', label: '继续' }] }],
+  }
+  await patch(rec.id, { status: 'running', progress: { kind: 'inquiry', inquiry } })
+  const answered = await tasks.answerInquiry(rec.id, 'u-admin', {
+    answers: [{ id: 'direction', selected: ['继续'] }],
+  })
+  assert.equal(answered.progress?.kind, 'inquiry-answered')
+  await assert.rejects(
+    () => tasks.answerInquiry(rec.id, 'u-hr-1', { cancelled: true }),
+    /task not found/,
+  )
+})

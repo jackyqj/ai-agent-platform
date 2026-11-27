@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 import { UsersModule } from '../users/users.module.js'
 import { TasksModule } from '../tasks/tasks.module.js'
 import { SessionsModule } from '../sessions/sessions.module.js'
@@ -9,7 +9,7 @@ import { DingtalkStreamService } from './dingtalk-stream.service.js'
 import { ImController } from './im.controller.js'
 
 @Module({
-  imports: [UsersModule, TasksModule, SessionsModule],
+  imports: [UsersModule, forwardRef(() => TasksModule), SessionsModule],
   controllers: [ImController],
   providers: [DingtalkApi, ImBindingsService, ImService, DingtalkStreamService],
   exports: [ImService, ImBindingsService],

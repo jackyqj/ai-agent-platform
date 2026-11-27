@@ -49,6 +49,7 @@ export interface Client {
   listTasks(): Promise<{ tasks: TaskView[] }>;
   submitTask(agentPresetId: string, task: string, sessionId?: string): Promise<TaskSubmitResult>;
   getTask(id: string): Promise<{ task: TaskView }>;
+  answerTaskInquiry(id: string, body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] }): Promise<{ task: TaskView }>;
   proposeAgent(body: { id: string; name: string; description: string; basedOn: string }): Promise<{ agent: Agent; notice: string }>;
 
   // ── 定时 Agent（20）用户侧 ──
@@ -226,6 +227,8 @@ export function createClient({ baseUrl, storage }: { baseUrl: string; storage?: 
         body: { agentPresetId, task, ...(sessionId ? { sessionId } : {}) },
       }),
     getTask: (id) => request<{ task: TaskView }>(`/tasks/${id}`),
+    answerTaskInquiry: (id, body) =>
+      request<{ task: TaskView }>(`/tasks/${id}/inquiry`, { method: 'POST', body }),
     proposeAgent: (body) => request<{ agent: Agent; notice: string }>('/agents/propose', { method: 'POST', body }),
 
     // 定时 Agent（20）用户侧

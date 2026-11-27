@@ -45,6 +45,42 @@
     mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
     workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
 
+# 员工 session cwd 仍在仓库 git 树内。默认 agent-instructions 会沿 .git 走到仓库根，
+# 把 AGENTS.md 注入提示词；skill-filesystem 会把宿主 ~/.agents/skills 与仓库 skills 编进目录。
+# disabled 与 maxBytes:0 / includeDefaultRoots:false 同时设，避免只关其一仍泄漏。
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  disabled: true
+  config:
+    maxBytes: 0
+    instructionFileCandidates: []
+    localInstructionFileCandidates: []
+    projectRootMarkers: []
+
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    customSkillDirs: []
+    watch: false
+
+- id: tool-skill
+  disabled: true
+- id: skill-office
+  disabled: true
+- id: upstream-skills
+  disabled: true
+
+# 上游 fs-sandbox 只拦写入。换成平台读围栏后端：stat/read/list/watch 也限制在 session cwd。
+- id: fs-sandbox
+  disabled: true
+- insert:
+    - id: fs-sandbox-read
+      name: '@deepseek-ai/dsh-fs-sandbox-read'
+
+# glob/grep 走 ripgrep 子进程，不经 ctx.fs；关掉以免按绝对 path 扫仓库。
+- id: tool-fs-search
+  disabled: true
+
 - id: tool-bash
   disabled: true
 - id: tool-pwsh

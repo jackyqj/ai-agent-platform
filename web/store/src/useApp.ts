@@ -130,6 +130,7 @@ export interface Actions {
   closeChat(): void;
   deleteSession(sessionId: string): Promise<void>;
   sendMessage(agentId: string, text: string): Promise<void>;
+  answerInquiry(body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] }): Promise<void>;
   cancelRun(): Promise<void>;
   toggleFavorite(agentId: string): Promise<void>;
   searchEmployeeKb(query?: string): Promise<void>;
@@ -573,7 +574,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     runAbort.current?.abort();
     const ac = new AbortController();
     runAbort.current = ac;
-    patchChat(agentId, { sending: true, runningTaskId: undefined });
+    patchChat(agentId, { sending: true, runningTaskId: undefined, awaitingApproval: false, inquiry: undefined, runPhase: undefined });
     const agent = state.agents.find((a) => a.id === agentId);
     if (agent?.knowledge) {
       void client.searchKb(text, 5).then((r) => {
@@ -582,14 +583,17 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     }
     try {
       const r = await client.submitTask(agentId, text, sessionId ?? undefined);
-      patchChat(agentId, { runningTaskId: r.taskId });
-      if (r.awaitingApproval) {
-        appendChatMessages(agentId, [{ role: 'assistant', text: '已提交，等待审批通过后执行。' }]);
-      }
+      patchChat(agentId, { runningTaskId: r.taskId, awaitingApproval: !!r.awaitingApproval });
+      if (r.awaitingApproval) await loadMyApprovals().catch(() => undefined);
       const outcome = await waitForTaskResult((id) => client.getTask(id), r.taskId, {
-        maxAttempts: r.awaitingApproval ? 180 : 40,
+        maxAttempts: 180,
         intervalMs: 1500,
         signal: ac.signal,
+        onProgress: (task) => {
+          const inquiry = task.progress?.kind === 'inquiry' ? task.progress.inquiry : undefined;
+          const runPhase = task.status === 'queued' ? 'queued' : task.status === 'running' ? 'running' : undefined;
+          patchChat(agentId, { inquiry, runPhase });
+        },
       });
       switch (outcome.kind) {
         case 'done':
@@ -639,7 +643,20 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
       }
     } finally {
       if (runAbort.current === ac) runAbort.current = null;
-      patchChat(agentId, { sending: false, runningTaskId: undefined });
+      patchChat(agentId, { sending: false, runningTaskId: undefined, awaitingApproval: false, inquiry: undefined, runPhase: undefined });
+    }
+  }
+
+  async function answerInquiry(body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] }): Promise<void> {
+    const chat = state.chat;
+    const taskId = chat?.runningTaskId;
+    if (!taskId || !chat.inquiry) return;
+    try {
+      const r = await client.answerTaskInquiry(taskId, body);
+      const inquiry = r.task.progress?.kind === 'inquiry' ? r.task.progress.inquiry : undefined;
+      patchChat(chat.agentId, { inquiry, runPhase: r.task.status === 'running' ? 'running' : chat.runPhase });
+    } catch (e) {
+      notify('问询提交失败：' + (e as Error).message, true);
     }
   }
 
@@ -648,7 +665,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
     const taskId = chat?.runningTaskId;
     runAbort.current?.abort();
     if (!taskId) {
-      if (chat) patchChat(chat.agentId, { sending: false, runningTaskId: undefined });
+      if (chat) patchChat(chat.agentId, { sending: false, runningTaskId: undefined, awaitingApproval: false, inquiry: undefined, runPhase: undefined });
       return;
     }
     try {
@@ -1768,7 +1785,7 @@ export function useApp(clientOverride?: Client): { state: AppState; act: Actions
   }
 
   const act: Actions = {
-    update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, cancelRun, toggleFavorite, searchEmployeeKb, loadEmployeeKb, propose,
+    update, notify, login, logout, loadStore, loadAdminData, loadKbAdminData, startChat, openChat, closeChat, deleteSession, sendMessage, answerInquiry, cancelRun, toggleFavorite, searchEmployeeKb, loadEmployeeKb, propose,
     decide, toggleAgent, enableImEntrance, disableImEntrance, createAgent, removeAgent, setQuota, resolveQuotaAlert, loadScheduled, setSchedForm, createScheduled, runScheduled, setScheduledStatus, removeScheduled, loadSchedRuns, loadMyApprovals, cancelApproval, setRoleForm, upsertRole, removeRole, setAgentChain, focusUser, editUser, saveUser, setStatus,
     loadSessions, clearSessionFilter, openSession, stopInstance, reapIdle,
     saveOverlay, clearOverlay, loadAudit,

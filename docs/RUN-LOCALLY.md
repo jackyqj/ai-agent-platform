@@ -28,7 +28,7 @@ PG、Redis 已在 podman 中运行（adaptix 容器）。若本机没有，可�
 # 迁移（幂等，可重复执行）——迁移脚本在控制面包内
 CONTAINERS_CONF=... podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < apps/control-plane/migrations/001_init.sql
-... 002_tasks.sql ... 003_approvals.sql ... 004_quota.sql ... 005_scheduled_tasks.sql ... 006_secrets.sql ... 007_users.sql ... 008_agent_composition.sql ... 009_quota_alerts.sql ... 010_scheduled_extra.sql ... 011_role_definitions.sql ... 012_multilevel_approval.sql ... 013_quota_policy_unique.sql ... 014_composite_catalog.sql ... 015_graph_revisions.sql
+... 002_tasks.sql ... 015_graph_revisions.sql ... 022_im_agent_bindings.sql ... 023_task_progress.sql
 # 样例数据（试点报表场景）
 podman exec -i adaptix-postgres psql -U adaptix -d control_plane \
   < services/mcp-db/seed.sql   #（或按 mcp-db README 手建 demo_sales）
@@ -108,19 +108,26 @@ curl -s http://127.0.0.1:${LITELLM_PORT:-4001}/v1/chat/completions \
 
 ## 4. 启动任务 Worker（真实执行 Agent 任务）
 
+JSONL 会话加锁依赖 DSH 的宿主 flock addon（`native/system/packages/<os-arch>/bin/system.node`，不入库）。首次或 subtree 升级后在 `dsh-source/` 编译一次：
+
+```sh
+cd dsh-source
+pnpm run build:native-system
+```
+
 ```sh
 cd dsh-source/apps/task-worker   # DSH prefix 上的 Vendor overlay（见 GLOSSARY.md）
 export DSH_HOME="$REPO_ROOT/.dsh-home"
 export DATABASE_URL="$PG_DSN"
-# cloud/* 与 private/* 经 LiteLLM gateway；其他模型 id 使用官方 DeepSeek route。
-# 默认 cloud/deepseek + http://127.0.0.1:4001/v1；网关 key 从 D20 vault 按请求解析。
+# cloud/* 与 private/* 经 LiteLLM gateway（GATEWAY_KEY，本地也可用 LITELLM_MASTER_KEY）。
+# 未配置网关密钥时，cloud/deepseek 回退官方 DeepSeek（vault DEEPSEEK_API_KEY 或 DS_API_KEY）。
 export DSH_MODEL="${DSH_MODEL:-cloud/deepseek}"
-# 直连示例：DSH_MODEL=deepseek-flash（使用 DEEPSEEK_API_KEY / DS_API_KEY）
+# 强制直连示例：DSH_MODEL=deepseek-v4-flash
 ./node_modules/.bin/tsx src/worker.ts
 # → [worker] ready (..., model=cloud/deepseek)
 ```
 
-Worker 会通过新版 DSH SDK 拉起 JSON-RPC 运行时并加载 `worker.cordis.yml`，其中挂载知识库/数据库两个 MCP Server。
+Worker 会通过新版 DSH SDK 拉起 JSON-RPC 运行时并加载 `worker.cordis.yml`，其中挂载知识库/数据库两个 MCP Server。会话 JSONL 在 `dsh-source/apps/task-worker/.sessions-worker/`；每个对话的可写沙箱是 `.sessions-worker/workspaces/<sessionId>/cwd`（`DSH_CWD` 若设置则作为 workspaces 父目录）。员工运行时用 `fs-sandbox-read` 把文件读写都限制在该叶目录（写入仍可落 `/tmp`；读/stat/list/watch/lstat 含 `additionalWritableRoots`，不含平台 temp；`glob`/`grep` 关闭；不注入仓库 `AGENTS.md` / 宿主 skills）。旧的共享目录 `workspace/` 不再作为默认 cwd。
 
 ## 5. 启动商店 UI（Vite + React + TS）
 

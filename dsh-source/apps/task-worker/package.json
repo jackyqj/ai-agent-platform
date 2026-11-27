@@ -13,6 +13,7 @@
     "@deepseek-ai/dsh": "workspace:^",
     "@deepseek-ai/dsh-sdk-client": "workspace:^",
     "@deepseek-ai/dsh-credentials-pg": "workspace:^",
+    "@deepseek-ai/dsh-fs-sandbox-read": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
     "bullmq": "^5.0.0",
     "pg": "^8.16.3"

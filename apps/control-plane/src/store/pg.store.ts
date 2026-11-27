@@ -220,7 +220,7 @@ export class PgStore {
   async getTask(id: string) {
     const res = await this.pool!.query(
       `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status,
-              result, error, created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt"
+              result, error, progress, created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt"
        FROM tasks WHERE id = $1`,
       [id],
     )
@@ -230,13 +230,13 @@ export class PgStore {
   async listTasks(userId?: string, limit = 50) {
     const res = userId
       ? await this.pool!.query(
-          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error,
+          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error, progress,
                   created_at AS "createdAt", finished_at AS "finishedAt"
            FROM tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
           [userId, limit],
         )
       : await this.pool!.query(
-          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error,
+          `SELECT id, user_id AS "userId", agent_preset_id AS "agentPresetId", payload, status, result, error, progress,
                   created_at AS "createdAt", finished_at AS "finishedAt"
            FROM tasks ORDER BY created_at DESC LIMIT $1`,
           [limit],
@@ -244,7 +244,7 @@ export class PgStore {
     return res.rows
   }
 
-  async updateTask(id: string, patch: { status?: string; result?: unknown; error?: string; started?: boolean; finished?: boolean }): Promise<void> {
+  async updateTask(id: string, patch: { status?: string; result?: unknown; error?: string; started?: boolean; finished?: boolean; progress?: unknown }): Promise<void> {
     const sets: string[] = []
     const args: unknown[] = []
     if (patch.status) {
@@ -258,6 +258,10 @@ export class PgStore {
     if (patch.error !== undefined) {
       args.push(patch.error)
       sets.push(`error = $${args.length}`)
+    }
+    if (patch.progress !== undefined) {
+      args.push(JSON.stringify(patch.progress))
+      sets.push(`progress = $${args.length}`)
     }
     if (patch.started) sets.push(`started_at = now()`)
     if (patch.finished) sets.push(`finished_at = now()`)

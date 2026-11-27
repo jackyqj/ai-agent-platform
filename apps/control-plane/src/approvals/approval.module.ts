@@ -1,9 +1,9 @@
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 import { ApprovalService } from './approval.service.js'
 import { AgentsModule } from '../agents/agents.module.js'
 
 @Module({
-  imports: [AgentsModule],
+  imports: [forwardRef(() => AgentsModule)],
   providers: [ApprovalService],
   exports: [ApprovalService],
 })

@@ -13,6 +13,7 @@
 |---|---|
 | `apps/task-worker/` | 平台任务 Worker（BullMQ 消费 + TS SDK 驱动 `sdk` profile + `--patch`） |
 | `packages/platform/tool-mcp-visibility/` | MCP 工具可见性过滤（`@deepseek-ai/dsh-tool-mcp-visibility`；所有权仍是 D21） |
+| `packages/platform/fs-sandbox-read/` | 员工文件读围栏（`@deepseek-ai/dsh-fs-sandbox-read`） |
 | `packages/session/session-persistence-pg/` | PG SessionPersistence adapter |
 | `packages/credentials/credentials-pg/` | PG 凭据 adapter（D20：vault 优先、按请求 resolve） |
 | `VENDOR.md` | 本文件 |
@@ -30,7 +31,7 @@
 1. `git fetch https://github.com/deepseek-ai/deepseek-harness.git tag <tag>`（步骤见 [deps/README.md](../deps/README.md)）
 2. `git subtree pull --prefix=dsh-source --squash FETCH_HEAD`
 3. `deps/overlay.sh`
-4. 平台测试：PG 会话 Provider、凭据 Provider、Worker `resolve-session-id`、`tool-mcp-visibility` vitest
+4. 平台测试：PG 会话 Provider、凭据 Provider、Worker `resolve-session-id`、`tool-mcp-visibility` / `fs-sandbox-read` vitest
 5. 更新本文件指针及 `docs/map.md`、`docs/system-arch42.md`
 
 ## Session format compatibility

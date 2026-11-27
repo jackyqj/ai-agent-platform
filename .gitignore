@@ -4,7 +4,8 @@
 .dsh-home/m0-test.yml
 .dsh-home/pg-persist-test.yml
 .dsh-home/*.log
-dsh-source/packages/platform/task-worker/.sessions-worker/
+dsh-source/apps/task-worker/.sessions-worker/
+dsh-source/apps/task-worker/workspace/
 node_modules/
 *.tsbuildinfo
 .DS_Store

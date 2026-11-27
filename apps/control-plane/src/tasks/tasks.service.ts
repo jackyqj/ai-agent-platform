@@ -11,6 +11,27 @@ import { UsersService } from '../users/users.service.js'
 import { PermissionPolicyService } from '../common/permission-policy.service.js'
 import { SessionsService } from '../sessions/sessions.service.js'
 
+export interface TaskInquiry {
+  requestId: string
+  questions: {
+    id: string
+    prompt: string
+    header?: string
+    detail?: string
+    multiSelect?: boolean
+    options: { id: string; label: string; hint?: string }[]
+  }[]
+}
+
+export type TaskInquiryAnswer =
+  | { requestId: string; cancelled: true }
+  | { requestId: string; answers: { id: string; selected: string[]; custom?: string }[] }
+
+export type TaskProgress =
+  | { kind: 'inquiry'; inquiry: TaskInquiry }
+  | { kind: 'inquiry-answered'; inquiry: TaskInquiry; answer: TaskInquiryAnswer }
+  | { kind: 'working'; label?: string }
+
 export interface TaskRecord {
   id: string
   userId: string
@@ -19,6 +40,7 @@ export interface TaskRecord {
   status: 'queued' | 'running' | 'done' | 'failed'
   result?: { finalResponse: string; finishReason?: string | null }
   error?: string
+  progress?: TaskProgress
   createdAt: string
   startedAt?: string
   finishedAt?: string
@@ -140,13 +162,60 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.get(id)
   }
 
-  private async patchRecord(id: string, p: { status?: string; result?: unknown; error?: string; finished?: boolean }) {
+  private async patchRecord(id: string, p: { status?: string; result?: unknown; error?: string; finished?: boolean; progress?: TaskProgress }) {
     if (!this.memoryFallback()) {
       await this.pg.updateTask(id, p).catch((e) => this.logger.error(`PG updateTask failed: ${(e as Error).message}`))
     } else {
       const t = this.memory.get(id)
-      if (t) Object.assign(t, p.status && { status: p.status }, p.result !== undefined && { result: p.result }, p.error !== undefined && { error: p.error })
+      if (t) {
+        Object.assign(
+          t,
+          p.status && { status: p.status },
+          p.result !== undefined && { result: p.result },
+          p.error !== undefined && { error: p.error },
+          p.progress !== undefined && { progress: p.progress },
+        )
+      }
     }
+  }
+
+  /** Owner answers a hanging ask_user_question. Worker polls progress until inquiry-answered. */
+  async answerInquiry(
+    id: string,
+    userId: string,
+    body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] },
+  ): Promise<TaskRecord> {
+    const task = await this.get(id)
+    if (!task || task.userId !== userId) throw new Error('task not found')
+    if (task.status !== 'running') throw new Error('task is not waiting for an answer')
+    const progress = task.progress
+    if (!progress || progress.kind !== 'inquiry') throw new Error('no pending inquiry')
+    const requestId = progress.inquiry.requestId
+    let answer: TaskInquiryAnswer
+    if (body.cancelled) {
+      answer = { requestId, cancelled: true }
+    } else {
+      const answers = body.answers ?? []
+      const expected = new Set(progress.inquiry.questions.map((q) => q.id))
+      const seen = new Set<string>()
+      for (const item of answers) {
+        if (!expected.has(item.id) || seen.has(item.id)) throw new Error('inquiry answers must name each question once')
+        seen.add(item.id)
+      }
+      if (seen.size !== expected.size) throw new Error('inquiry answers must name each question once')
+      answer = { requestId, answers }
+    }
+    await this.patchRecord(id, {
+      progress: { kind: 'inquiry-answered', inquiry: progress.inquiry, answer },
+    })
+    await this.audit.append({
+      userId,
+      eventType: 'task.inquiry_answered',
+      payload: { taskId: id, requestId, cancelled: !!body.cancelled },
+    })
+    const updated = await this.get(id)
+    if (!updated) throw new Error('task not found')
+    return updated
   }
 
   async get(id: string): Promise<TaskRecord | undefined> {

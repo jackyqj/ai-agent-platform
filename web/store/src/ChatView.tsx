@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { extractArtifacts, extractCitations, mergeCitations } from './chat-extract';
+import { buildChatTimeline, liveStripText } from './chat-timeline';
 import { resolveSessionTitle } from './chat-utils';
+import CopyTextButton from './CopyTextButton';
 import MarkdownBody from './MarkdownBody';
 import type { Actions } from './useApp';
-import type { AppState, SessionRow } from './types';
+import type { AppState, ChatItem, SessionRow, TaskInquiry } from './types';
 
 export default function ChatView({ state, act }: { state: AppState; act: Actions }) {
   const chat = state.chat;
@@ -17,6 +19,33 @@ export default function ChatView({ state, act }: { state: AppState; act: Actions
     () => messages.filter((m) => m.role === 'assistant').flatMap((m) => extractArtifacts(m.text)),
     [messages],
   );
+  const pending = state.myApprovals.filter((a) => a.status === 'pending');
+  const timeline = useMemo(
+    () => buildChatTimeline({
+      messages,
+      sending: chat?.sending,
+      awaitingApproval: chat?.awaitingApproval,
+      pendingApprovals: pending,
+      runPhase: chat?.runPhase,
+      inquiry: chat?.inquiry,
+    }),
+    [messages, chat?.sending, chat?.awaitingApproval, pending, chat?.runPhase, chat?.inquiry],
+  );
+  const live = liveStripText({
+    error: chat?.error,
+    sending: chat?.sending,
+    awaitingApproval: chat?.awaitingApproval,
+    pendingCount: pending.length,
+    runPhase: chat?.runPhase,
+    inquiry: !!chat?.inquiry,
+  });
+  const streamRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = streamRef.current;
+    if (!el) return;
+    const slack = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (slack < 96) el.scrollTop = el.scrollHeight;
+  }, [timeline.length, live, chat?.inquiry?.requestId]);
 
   if (!chat) return null;
 
@@ -25,13 +54,19 @@ export default function ChatView({ state, act }: { state: AppState; act: Actions
   const name = agent?.name ?? agentId;
   const sending = chat.sending ?? false;
   const title = resolveSessionTitle(name, chat.sessionId, state.sessionTitles, messages);
-  const pending = state.myApprovals.filter((a) => a.status === 'pending');
 
   async function send() {
     const text = draft.trim();
     if (!text || sending) return;
     setDraft('');
     await act.sendMessage(agentId, text);
+  }
+
+  function onComposerKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
   }
 
   return (
@@ -63,43 +98,47 @@ export default function ChatView({ state, act }: { state: AppState; act: Actions
           <div className="banner ok">正在加载历史记录…</div>
         ) : null}
 
-        <div className="transcript">
-          {!chat.historyLoading && messages.length === 0 ? (
+        <div className="transcript" ref={streamRef} aria-label="对话时间线">
+          {!chat.historyLoading && timeline.length === 0 ? (
             <div className="empty">直接输入问题。需要审批的助手会先挂起任务。</div>
           ) : (
-            messages.map((m, i) => (
-              <div key={i} className={'bubble ' + m.role + (m.pending ? ' pending' : '')}>
-                <div className="bubble-role">{m.role === 'user' ? '我' : name}</div>
-                {m.role === 'assistant' && !m.pending ? (
-                  <MarkdownBody text={m.text} />
-                ) : (
-                  <div className="bubble-text">{m.text}</div>
-                )}
-              </div>
+            timeline.map((item, i) => (
+              <TimelineRow
+                key={`${item.kind}-${i}`}
+                item={item}
+                agentName={name}
+                inquiry={chat.inquiry}
+                onCancelApproval={(id) => void act.cancelApproval(id)}
+                onAnswerInquiry={(body) => void act.answerInquiry(body)}
+              />
             ))
           )}
         </div>
 
-        <div className="composer">
-          <input
+        <div className="chat-live" role="status">{live}</div>
+
+        <form
+          className="composer"
+          aria-label="发送消息"
+          onSubmit={(e) => { e.preventDefault(); void send(); }}
+        >
+          <textarea
             value={draft}
-            placeholder="跟森米说点什么…"
-            disabled={!!chat.error}
+            placeholder={chat.inquiry ? '先在上面的问询卡里选择方向…' : '跟森米说点什么…'}
+            disabled={!!chat.error || !!chat.inquiry}
+            rows={3}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}
+            onKeyDown={onComposerKey}
           />
           {sending ? (
-            <button className="danger" onClick={() => void act.cancelRun()}>停止</button>
+            <button type="button" className="danger" onClick={() => void act.cancelRun()}>停止</button>
           ) : (
-            <button disabled={!!chat.error} onClick={() => void send()}>发送</button>
+            <button type="submit" disabled={!!chat.error}>发送</button>
           )}
-        </div>
+        </form>
       </div>
 
       <aside className="chat-rail" aria-label="对话侧栏">
-        <div className={'rail-status' + (sending ? ' rail-status--busy' : '')}>
-          {sending ? '运行中' : chat.error ? '待重试' : pending.length ? '等待审批' : '就绪'}
-        </div>
         <section className="mini">
           <h5>当前 Agent</h5>
           <p>{name}</p>
@@ -120,22 +159,6 @@ export default function ChatView({ state, act }: { state: AppState; act: Actions
           <section className="mini">
             <h5>引用</h5>
             <p>知识库出处会在回答后出现在这里。</p>
-          </section>
-        ) : null}
-        {pending.length > 0 ? (
-          <section className="mini">
-            <h5>审批闸门 · {pending.length}</h5>
-            <ul className="queue-list">
-              {pending.map((a) => (
-                <li key={a.id} className="queue-item">
-                  <div className="queue-body">
-                    <span className="queue-label">{a.action}</span>
-                    <span className="queue-meta">{a.level}</span>
-                  </div>
-                  <button className="danger small" onClick={() => void act.cancelApproval(a.id)}>撤销</button>
-                </li>
-              ))}
-            </ul>
           </section>
         ) : null}
         {artifacts.length > 0 ? (
@@ -166,6 +189,163 @@ export default function ChatView({ state, act }: { state: AppState; act: Actions
         ) : null}
       </aside>
     </div>
+  );
+}
+
+function TimelineRow({
+  item,
+  agentName,
+  inquiry,
+  onCancelApproval,
+  onAnswerInquiry,
+}: {
+  item: ChatItem;
+  agentName: string;
+  inquiry?: TaskInquiry;
+  onCancelApproval: (id: string) => void;
+  onAnswerInquiry: (body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] }) => void;
+}) {
+  switch (item.kind) {
+    case 'user':
+      return (
+        <div className="bubble user">
+          <div className="bubble-toolbar">
+            <div className="bubble-role">我</div>
+          </div>
+          <div className="bubble-text">{item.text}</div>
+        </div>
+      );
+    case 'assistant':
+      return (
+        <div className="bubble assistant">
+          <div className="bubble-toolbar">
+            <div className="bubble-role">{agentName}</div>
+            <CopyTextButton text={item.text} label="复制原文" />
+          </div>
+          <MarkdownBody text={item.text} />
+        </div>
+      );
+    case 'status':
+      return (
+        <ol className="chat-status" aria-label="本回合步骤">
+          <li className={'chat-step' + (item.phase === 'running' ? ' chat-step--live' : '')}>
+            <span>{item.label}</span>
+          </li>
+        </ol>
+      );
+    case 'approval':
+      return (
+        <section className="chat-gate" aria-label="审批闸门">
+          <div className="chat-gate-kicker">需要审批</div>
+          <p>{item.action}</p>
+          <p className="chat-gate-meta">{item.level}</p>
+          {item.status === 'pending' ? (
+            <button className="danger small" onClick={() => onCancelApproval(item.approvalId)}>撤销</button>
+          ) : null}
+        </section>
+      );
+    case 'inquiry':
+      return inquiry ? (
+        <InquiryCard inquiry={inquiry} onAnswer={onAnswerInquiry} />
+      ) : (
+        <section className="chat-gate" aria-label="问询">
+          <div className="chat-gate-kicker">需要你拍板</div>
+          <p>{item.prompt}</p>
+        </section>
+      );
+    case 'notice':
+      return <div className={'chat-notice chat-notice--' + item.tone}>{item.text}</div>;
+    default: {
+      const _never: never = item;
+      return _never;
+    }
+  }
+}
+
+function InquiryCard({
+  inquiry,
+  onAnswer,
+}: {
+  inquiry: TaskInquiry;
+  onAnswer: (body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] }) => void;
+}) {
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [extra, setExtra] = useState('');
+  useEffect(() => {
+    setPicked({});
+    setExtra('');
+  }, [inquiry.requestId]);
+
+  function toggle(questionId: string, optionId: string, multi: boolean) {
+    setPicked((prev) => {
+      const current = prev[questionId] ?? [];
+      if (multi) {
+        const next = current.includes(optionId) ? current.filter((id) => id !== optionId) : [...current, optionId];
+        return { ...prev, [questionId]: next };
+      }
+      return { ...prev, [questionId]: [optionId] };
+    });
+  }
+
+  const ready = inquiry.questions.every((question) => (
+    question.options.length === 0 || (picked[question.id] ?? []).length > 0
+  ));
+
+  function submit() {
+    if (!ready) return;
+    onAnswer({
+      answers: inquiry.questions.map((question, index) => ({
+        id: question.id,
+        selected: picked[question.id] ?? [],
+        ...(index === 0 && extra.trim() ? { custom: extra.trim() } : {}),
+      })),
+    });
+  }
+
+  return (
+    <section className="chat-gate" aria-label="问询">
+      <div className="chat-gate-kicker">需要你拍板</div>
+      {inquiry.questions.map((question) => {
+        const selected = picked[question.id] ?? [];
+        const title = question.header ? `${question.header} · ${question.prompt}` : question.prompt;
+        return (
+          <div key={question.id} className="chat-inquiry-q">
+            <p>{title}</p>
+            {question.detail ? <p className="chat-gate-meta">{question.detail}</p> : null}
+            {question.options.length > 0 ? (
+              <div className="chat-choices" role="group" aria-label={title}>
+                {question.options.map((option) => {
+                  const on = selected.includes(option.id);
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={'chat-choice' + (on ? ' is-on' : '')}
+                      aria-pressed={on}
+                      onClick={() => toggle(question.id, option.id, !!question.multiSelect)}
+                    >
+                      {option.label}
+                      {option.hint ? <span>{option.hint}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      <textarea
+        rows={2}
+        value={extra}
+        placeholder="补充一句（可选）"
+        aria-label="补充说明"
+        onChange={(e) => setExtra(e.target.value)}
+      />
+      <div className="row">
+        <button type="button" onClick={submit} disabled={!ready}>提交</button>
+        <button type="button" className="ghost" onClick={() => onAnswer({ cancelled: true })}>跳过</button>
+      </div>
+    </section>
   );
 }
 

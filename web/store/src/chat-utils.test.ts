@@ -46,6 +46,32 @@ describe('waitForTaskResult', () => {
     );
     expect(result).toEqual({ kind: 'failed', text: '拒绝执行' });
   });
+
+  it('does not consume the attempt budget while an inquiry is hanging', async () => {
+    const statuses: Array<{ status: string; progress?: TaskView['progress']; result?: { finalResponse: string } }> = [
+      { status: 'running', progress: { kind: 'inquiry', inquiry: { requestId: 'rq1', questions: [] } } },
+      { status: 'running', progress: { kind: 'inquiry', inquiry: { requestId: 'rq1', questions: [] } } },
+      { status: 'running', progress: { kind: 'inquiry', inquiry: { requestId: 'rq1', questions: [] } } },
+      { status: 'done', result: { finalResponse: '选好了' } },
+    ];
+    let i = 0;
+    const seen: string[] = [];
+    const result = await waitForTaskResult(
+      async () => {
+        const row = statuses[Math.min(i, statuses.length - 1)]!;
+        i += 1;
+        return { task: { id: 't1', ...row } };
+      },
+      't1',
+      {
+        maxAttempts: 2,
+        sleep: async () => undefined,
+        onProgress: (task) => { seen.push(task.status); },
+      },
+    );
+    expect(result).toEqual({ kind: 'done', text: '选好了' });
+    expect(seen).toEqual(['running', 'running', 'running', 'done']);
+  });
 });
 
 describe('tasksToMessages', () => {

@@ -136,15 +136,23 @@ export type TaskWaitResult =
 export async function waitForTaskResult(
   getTask: (id: string) => Promise<{ task: TaskView }>,
   taskId: string,
-  opts?: { maxAttempts?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; signal?: AbortSignal },
+  opts?: {
+    maxAttempts?: number;
+    intervalMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    signal?: AbortSignal;
+    onProgress?: (task: TaskView) => void;
+  },
 ): Promise<TaskWaitResult> {
   const maxAttempts = opts?.maxAttempts ?? 120;
   const intervalMs = opts?.intervalMs ?? 1500;
   const sleep = opts?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const signal = opts?.signal;
-  for (let i = 0; i < maxAttempts; i++) {
+  let idle = 0;
+  while (idle < maxAttempts) {
     if (signal?.aborted) return { kind: 'cancelled' };
     const g = await getTask(taskId);
+    opts?.onProgress?.(g.task);
     if (signal?.aborted || g.task.status === 'killed') {
       return { kind: 'cancelled' };
     }
@@ -155,6 +163,7 @@ export async function waitForTaskResult(
     if (g.task.status === 'failed') {
       return { kind: 'failed', text: (g.task.error || g.task.result?.finalResponse || '任务失败').trim() };
     }
+    if (g.task.progress?.kind !== 'inquiry') idle += 1;
     await sleep(intervalMs);
   }
   return { kind: 'timeout' };

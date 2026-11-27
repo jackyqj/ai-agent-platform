@@ -14,3 +14,5 @@ fi
 
 pnpm install
 pnpm run gen-tsconfig-paths
+# JSONL/SQLite session leases need the host flock addon; binaries are gitignored.
+pnpm run build:native-system

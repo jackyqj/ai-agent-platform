@@ -66,6 +66,23 @@ export class TasksController {
     return { task: t }
   }
 
+  /** 回答当前挂起的问询（归属人） */
+  @Post('tasks/:id/inquiry')
+  @UseGuards(AuthGuard)
+  async inquiry(
+    @Req() req: { user: { sub: string } },
+    @Param('id') id: string,
+    @Body() body: { cancelled?: boolean; answers?: { id: string; selected: string[]; custom?: string }[] },
+  ) {
+    try {
+      const task = await this.tasks.answerInquiry(id, req.user.sub, body ?? {})
+      return { task }
+    } catch (e) {
+      const message = (e as Error).message
+      throw new HttpException(message, message === 'task not found' ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST)
+    }
+  }
+
   /** 人工取消（归属人或 admin） */
   @Post('tasks/:id/cancel')
   @UseGuards(AuthGuard)
